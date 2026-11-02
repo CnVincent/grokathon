@@ -47,7 +47,7 @@ async def send_error(
         {
             "type": "session_error",
             "session_id": session_id,
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "code": code,
             "message": message,
             "request": request,
@@ -252,7 +252,7 @@ async def session(websocket: WebSocket, session_id: str = Query(min_length=1)) -
                 {
                     "type": "tone_result",
                     "session_id": session_id,
-                    "schema_version": "1.1",
+                    "schema_version": "1.2",
                     "caption_id": caption_id,
                     "tag": prediction.tag,
                     "probs": prediction.probs,

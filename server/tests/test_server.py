@@ -30,7 +30,7 @@ def tone_request():
     return {
         "type": "tone_request",
         "session_id": "test-session",
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "caption_id": str(uuid4()),
         "t_start": 1.0,
         "t_end": 1.1,
@@ -68,12 +68,12 @@ def test_caption_log_does_not_interrupt_tone(client):
     caption_log = {
         "type": "caption_log",
         "session_id": request["session_id"],
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "tone_tag": None,
         "caption": {
             "type": "caption",
             "session_id": request["session_id"],
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "caption_id": request["caption_id"],
             "t_start": 1.0,
             "t_end": 1.1,

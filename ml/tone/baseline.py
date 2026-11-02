@@ -1,91 +1,30 @@
-#allows me to measure processing time per audio clip
-#pathlib finds all the audio files within test_audio
-#soundfile loads in the audio files + allows for deterministric qualities
-#pytorch imports Pytorch, ML framework for audEERING model
-#torch.nn neural-network components
-#scipy.signal resamples audio from 48,000 Hz to 16,000 Hz
-#prepares raw audio for NN
+#command-line interface, processing a folder of clips, and saving CSV results
+#argparse lets us specify an audio folder and output CSV from terminal
+#csv lets us save predictions in a structured file
+#Path will help us find and organize audio files
+#soundfile loads in the audio files + reads their sample rate
+#AudeeringBackend gives us access to model functionality we moved into backend.py
 
-import time
+import argparse
+import csv
 from pathlib import Path
 
 import soundfile as sf
-import torch
-import torch.nn as nn
-from scipy.signal import resample_poly
-from transformers import Wav2Vec2Processor
-from transformers.models.wav2vec2.modeling_wav2vec2 import (
-    Wav2Vec2Model,
-    Wav2Vec2PreTrainedModel,
-)
 
-#using the same pretrained audEERING model from Hugging Face
-MODEL_NAME = "audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim"
-#retrieve necessary test audio files from test_audio folder
-AUDIO_FOLDER = "ml/tone/test_audio"
+from ml.tone.backend import AudeeringBackend
 
-#NN head used by the audEERING model
-#outputs three values: arousal, dominance, and valence
-class RegressionHead(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        #Linear Layer #1 transforms the Wav2Vec2 representation
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        #dropout reduces unnecessary dependence on the individual features
-        self.dropout = nn.Dropout(config.final_dropout)
-        #Final Linear Layer produces the three emotion dimensions
-        self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
-
-    def forward(self, features):
-        #dropout for the input features
-        x = self.dropout(features)
-        #pass the features through Linear Layer #1
-        x = self.dense(x)
-        #tanh activation function
-        #This recreates the architecture from the pretrained audEERING model,
-        # #which provides the weights used by this implementation
-        x = torch.tanh(x)
-        #dropout applied again before the Final Linear Layer
-        x = self.dropout(x)
-        #Produce the model's three output values
-        return self.out_proj(x)
-
-#maintains the architecture expected by the pretrained audEERING checkpoint
-class EmotionModel(Wav2Vec2PreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
-        #load in the Wav2Vec2 audio model
-        self.wav2vec2 = Wav2Vec2Model(config)
-        #attach the pretrained audEERING regression head (names must match)
-        self.classifier = RegressionHead(config)
-        #initialize the model structure before loading pretrained weights
-        self.post_init()
-
-    def forward(self, input_values):
-        #Send the processed audio through Wav2Vec2
-        outputs = self.wav2vec2(input_values)
-        #Get the hidden representation produced by Wav2Vec2
-        hidden_states = outputs[0]
-        #average the hidden states across the time dimension
-        hidden_states = torch.mean(hidden_states, dim=1)
-        #use the regression head to produce emotion scores
-        logits = self.classifier(hidden_states)
-        return hidden_states, logits
-
-#Load in the audio processor using locally available files <-- raw audio
-processor = Wav2Vec2Processor.from_pretrained(
-    MODEL_NAME,
-    local_files_only=True, #prevents Transformers from connecting to Hugging Face
-)
-
-#Load in the pretrained audEERING model from the local cache
-model = EmotionModel.from_pretrained(
-    MODEL_NAME,
-    local_files_only =True,
-)
-
-#Evaluate the model for prediction, not training
-model.eval()
+# Defines the CSV columns so even an empty folder produces a correctly
+# structured results file.
+FIELDNAMES = [
+    "file",
+    "speaker",
+    "label",
+    "arousal",
+    "valence",
+    "dominance",
+    "tag",
+    "latency_ms",
+]
 
 def load_audio(audio_file):
     #read in the audio file which contains sound samples and "sample_rate"
@@ -96,114 +35,126 @@ def load_audio(audio_file):
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
 
-    #since model expects audio sample to be 16000, we need to resample our current audio files
-    if sample_rate != 16000:
-        audio = resample_poly(audio, 16000, sample_rate)
-        sample_rate = 16000
-
     return audio, sample_rate
-
-#the following thresholds are defined in the GRAPTION_CONTEXT.md
-def map_tag(arousal, valence):
-
-    #High arousal means that the voice has a lot energy
-    #High valence means the emotion is more positive
-
-    if arousal > 0.65 and valence > 0.55:
-        return "excited"
-
-    #High arousal + low valence = upset/negative high-energy tone
-    if arousal > 0.65 and valence < 0.4:
-        return "upset"
-
-    #Low arousal indicates a calm or low-energy tone
-    if arousal < 0.3:
-        return "calm"
-
-    #if no rules are met, there is no evidence to assign one of the three tags
-    else:
-        return "none"
 
 #extract intended category from filename
 def extract_tag(audio_file):
     #use first part of filename as the intended category
     #this is bc filenames are organized as calm_clip_one.mp3
     filename = Path(audio_file).name
-    return filename.split("_")[0]  #category first part of the filename
+    #category first part of the filename
+    category = filename.split("_")[0]
+    #Convert "none" from the filename into Python's None value
+    if category == "none":
+        return None
+    return category
 
-#function that runs the model on one clip and measures its infernece time
-def analyze_clip(audio_file):
-
-    #start a timer right before processing a specific individual clip
-    start_time = time.perf_counter()
-
-    #remember to convert it to required audio format required by audEERING model
+#function that runs the model on one clip and measures its inference time
+def analyze_clip(audio_file, backend):
     audio, sample_rate = load_audio(audio_file)
-
-    #processor converts audio samples into tensors that the Wav2Vec2 model can comprehend
-    inputs = processor(
-        audio,
-        sampling_rate=sample_rate,
-        return_tensors="pt",
-    )
-
-
-    #disable gradient calcs since we only make predictions not training model
-    with torch.no_grad():
-        #processed audio is run through model
-        _, outputs = model(inputs.input_values)
-
-    #retrieve the three values in specified order
-    arousal, dominance, valence = outputs[0].tolist()
-
-    #convert the arousal and valence scores into one tone tag
-    tag = map_tag(arousal, valence)
-
-    #Stop the timer after processing the clip
-    elapsed_time = time.perf_counter() - start_time
+    result = backend.predict(audio, sample_rate)
 
     return {
         "file": Path(audio_file).name,
-        "arousal": arousal,
-        "dominance": dominance,
-        "valence": valence,
-        "tag": tag,
-        "elapsed_time": elapsed_time
+        "arousal": round(result["arousal"], 5),
+        "valence": round(result["valence"], 5),
+        "dominance": round(result["dominance"], 5),
+        "tag": result["tag"],
+        "latency_ms": round(result["latency_ms"], 5),
     }
 
-#retrieve all mp3 recordings from test_audio folder
-audio_files = sorted(Path(AUDIO_FOLDER).glob("*.mp3"))
+#Lets baseline.py accept an audio folder and an output CSV path from the terminal
+#replaces A4's concept of a local, hard-coded folder
+#main() groups the script's main workflow in one function
+def main():
+    parser = argparse.ArgumentParser(
+        description= "Run tone predictions on audio files."
+    )
 
-#Check: print out number of files retrieved to ensure all clips were recognized
-print(f"Found {len(audio_files)} audio files. \n")
+    #audio_dir points towards the specific folder with the audio files
+    parser.add_argument("audio_dir", help= "Folder containing audio files")
+    parser.add_argument(
+        "--out", #specifies where to save the CSV
+        default= "results.csv",
+        help= "Path for the output CSV file",
+    )
 
-#Process each audio file one at a time
-for audio_file in audio_files:
-    #analyze the clip and store its results
-    result = analyze_clip(audio_file)
+    #reads the arguments from the command line
+    args = parser.parse_args()
+    output_path = Path(args.out)
+    output_path.parent.mkdir(parents=True, exist_ok = True)
+    #turns the folder that the Path supplied in terminal to a path that object Python can work with
+    audio_dir = Path(args.audio_dir)
 
-    #get the intended category from the filename
-    expected_tag = extract_tag(audio_file)
+    #Checks that the supplied path exists and points to a directory
+    #provides clear error instead of failing and iterating over an invalid path
+    if not audio_dir.exists():
+        parser.error(f"Audio directory does not exist: {audio_dir}")
 
-    #check if model's tag name matches intended filename category
-    match = result['tag'] == expected_tag
+    if not audio_dir.is_dir():
+        parser.error(f"Audio path is not a directory: {audio_dir}")
 
-    #print the filename so we can correlate results to the original file
-    print(f"File: {result['file']}")
+    #looks at the files inside and checks file extension to only include audio files
+    audio_files = sorted(path for path in audio_dir.iterdir()
+                         if path.suffix.lower() in {".wav", ".mp3"}
+    )
 
-    #print the results for each clip
-    print(f"Arousal: {result['arousal']:.4f}")
-    print(f"Valence: {result['valence']:.4f}")
-    print(f"Dominance: {result['dominance']:.4f}")
+    #tells us how many supported audio files were found
+    print(f"Found {len(audio_files)} audio files.")
 
-    #prints the assigned tag created by the threshold rules
-    print(f"Tag: {result['tag']}")
+    #Load and warm up the model only when there are clips to process
+    backend = None
 
-    #print if the model's prediction matches the expected category
-    print(f"Match: {match}")
+    #checks the folder to see if the folder contains at least one supported audio file
+    if audio_files:
+        #loads tone model once so we can reuse for subsequent clips
+        backend = AudeeringBackend()
+        warmup_audio, warmup_sample_rate = load_audio(audio_files[0])
+        #runs one prediction to warm up the model
+        backend.predict(warmup_audio, warmup_sample_rate)
 
-    #print how long it took to process the clip
-    print(f"Time: {result['elapsed_time']:.2f} seconds")
+    #process each audio file and collect results
+    #empty list to store the results from all clips
+    results = []
+    for audio_file in audio_files:
+        #splits the filename into parts based on underscore delimiter
+        parts = audio_file.stem.split("_")
 
-    print() #blank line before repeating code above for next audio clip
+        #Expects that every audio filename follows the label_clip_name pattern
+        #The first part is the label, the last part is the numeric clip identifier
+        #and any parts in between the speaker
+        #checks if filename has at least 3 underscore-separated parts
+        if (
+            len(parts) < 3
+            or not parts[0]
+            or not parts[-1].isdigit()
+            or any(not part for part in parts)):
+            raise ValueError(
+                f"Unexpected filename format: {audio_file.stem}"
+                "Expected label_speaker_NN such as calm_speaker_01.wav."
+            )
 
+        #send clip to backend + retrieves predicted scores/tag
+        result = analyze_clip(audio_file, backend)
+        #stores the part after the label as clip identifier
+        result["speaker"] = "_".join(parts[1:-1])
+        #extracts the label from the filename
+        result["label"] = extract_tag(audio_file)
+        #stores completed result for CSV later
+        results.append(result)
+
+    #Write results into CSV file or overwrites it if it exists
+    with open(
+        output_path,"w", newline="", encoding="utf-8"
+    ) as csvfile:
+        #converts each result dictionary into a CSV row
+        writer = csv.DictWriter(csvfile, fieldnames=FIELDNAMES)
+        writer.writeheader() #writes the column names as the first row
+        writer.writerows(results) #saves all collected predictions
+    print(f"Results written to {output_path}") #tells us where the results were saved
+
+
+#This is the entry point for the script
+#Ensures that main() is only called when the script is run directly
+if __name__ == "__main__":
+    main()

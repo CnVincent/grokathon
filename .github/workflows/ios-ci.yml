@@ -22,7 +22,14 @@ jobs:
             -project apps/ios/Graption.xcodeproj \
             -scheme Graption \
             -destination 'generic/platform=iOS Simulator' \
+            -sdk iphonesimulator \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            'EXCLUDED_ARCHS[sdk=iphonesimulator*]=x86_64' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Test GraptionVision
+        run: swift test --package-path apps/ios/Packages/GraptionVision
 
 #mac-os latest or xcode-27 for the mac server to host and run the Github Actions Server on?

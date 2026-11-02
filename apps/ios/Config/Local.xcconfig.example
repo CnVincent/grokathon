@@ -6,3 +6,9 @@ DEVELOPMENT_TEAM = XXXXXXXXXX
 
 // Anything unique to you, lowercase letters/numbers only. Bundle ID becomes edu.gatech.graption.<this>
 DEV_SUFFIX = yourname
+
+// Development tone server. Use your Mac's LAN IP or a wss:// tunnel URL; never commit a token.
+// xcconfig treats // as a comment, so spell ws:// as ws:/$()/ here.
+// Example local URL: ws:/$()/192.168.1.8:8000
+TONE_URL =
+TONE_TOKEN =

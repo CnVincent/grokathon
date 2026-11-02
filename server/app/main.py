@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from app.observability import close_logging, configure_logging, record
-from app.tone import MockToneBackend
+from app.tone import create_backend
 from app.ws import router
 
 
@@ -30,7 +30,8 @@ async def health() -> str:
 def create_app(*, verbose: bool = False) -> FastAPI:
     app = FastAPI(title="Graption tone server", lifespan=lifespan)
     app.state.verbose = verbose
-    app.state.tone_backend = MockToneBackend()
+    # TONE_BACKEND picks the model (default mock); see app/tone.py.
+    app.state.tone_backend = create_backend()
     app.include_router(router)
     app.add_api_route("/health", health, response_class=PlainTextResponse)
     return app

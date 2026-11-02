@@ -55,6 +55,7 @@ Pods/
 *.ipa
 *.dSYM.zip
 *.dSYM
+*.task
 
 
 # --- OS / editors ---

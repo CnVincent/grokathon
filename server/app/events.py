@@ -11,8 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 from typing_extensions import TypeAliasType
 
 
-class SchemaVersion(RootModel[Literal["1.1"]]):
-    root: Literal["1.1"]
+class SchemaVersion(RootModel[Literal["1.2"]]):
+    root: Literal["1.2"]
 
 
 class RequestEncoding(Enum):
@@ -208,7 +208,7 @@ class GraptionEvent(
     root: Annotated[
         SpeakerScores | Caption | SoundEvent | ToneRequest | CaptionLog | ToneResult | SessionError,
         Field(
-            description="Graption event contract v1.1 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
+            description="Graption event contract v1.2 (docs/GRAPTION_CONTEXT.md section 5). All times are seconds since session start on the phone's monotonic host clock. Changing this file = bump schema_version and regenerate Pydantic + Swift types.",
             title="GraptionEvent",
         ),
     ]

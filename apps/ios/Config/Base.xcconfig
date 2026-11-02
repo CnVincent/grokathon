@@ -7,5 +7,16 @@ PRODUCT_BUNDLE_IDENTIFIER = edu.gatech.graption.$(DEV_SUFFIX)
 
 // Required or iOS kills the app when it requests camera access.
 INFOPLIST_KEY_NSCameraUsageDescription = Graption uses the camera to see who is speaking.
+INFOPLIST_KEY_NSLocalNetworkUsageDescription = Graption connects to the development tone server on your local network.
+INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES
+
+// Local values live in Local.xcconfig and are injected into the app Info.plist.
+// Leave TONE_URL empty to disable tone networking for a build.
+TONE_URL =
+TONE_TOKEN =
+INFOPLIST_KEY_GraptionToneURL = $(TONE_URL)
+INFOPLIST_KEY_GraptionToneToken = $(TONE_TOKEN)
 
 #include? "Local.xcconfig"
+
+INFOPLIST_KEY_NSMicrophoneUsageDescription = Graption uses your microphone to detect speech and provide live captions.

@@ -3,21 +3,53 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 110;
 	objects = {
 
 /* Begin PBXBuildFile section */
-        A02900000000000000000001 /* GraptionCore in Frameworks */ = {isa = PBXBuildFile; productRef = A02900000000000000000003 /* GraptionCore */; };
+		A02900000000000000000001 /* GraptionCore in Frameworks */ = {isa = PBXBuildFile; productRef = A02900000000000000000003 /* GraptionCore */; };
+		19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF98307713050033A27A /* MediaPipeTasksAudio */; };
+		19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9A307713050033A27A /* MediaPipeTasksVision */; };
+		19DABF9E307713050033A27A /* GraptionVision in Frameworks */ = {isa = PBXBuildFile; productRef = 19DABF9D307713050033A27A /* GraptionVision */; };
+		5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1504F8340E9DC8A84ACE6184 /* GraptionUI */; };
+		65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 65CCECAF3074877500093FF3 /* GraptionAudio */; };
+		A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
+		65CCECB13074998900093FF3 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		65CCECB23074998900093FF3 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		65CCECB33074998900093FF3 /* Local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = Local.xcconfig.example; sourceTree = "<group>"; };
 		9835CFA1306C55A900F6C1EC /* Graption.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Graption.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9835CFB0306C55AA00F6C1EC /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Base.xcconfig; path = Config/Base.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9835CFA0306C55A900F6C1EC /* Graption */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		65CCEC8E30746DA700093FF3 /* GraptionAudio */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = GraptionAudio;
+			sourceTree = "<group>";
+		};
+		6CF0856F124649A4FFEEDDAD /* GraptionUI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = GraptionUI;
+			sourceTree = "<group>";
+		};
 		9835CFA3306C55A900F6C1EC /* Graption */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D4E5F60708090A0B07 /* Exceptions for "Graption" folder in "Graption" target */,
+			);
 			path = Graption;
 			sourceTree = "<group>";
 		};
@@ -27,18 +59,45 @@
 		9835CF9E306C55A900F6C1EC /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-                A02900000000000000000001 /* GraptionCore in Frameworks */,
+				A02900000000000000000001 /* GraptionCore in Frameworks */,
+				65CCECB03074877500093FF3 /* GraptionAudio in Frameworks */,
+				5A863841E58064FDABEE6763 /* GraptionUI in Frameworks */,
+				19DABF9B307713050033A27A /* MediaPipeTasksVision in Frameworks */,
+				19DABF99307713050033A27A /* MediaPipeTasksAudio in Frameworks */,
+				19DABF9E307713050033A27A /* GraptionVision in Frameworks */,
+				A1B2C3D4E5F60708090A0B02 /* GraptionNetwork in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		65CCEC8D30746D9400093FF3 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				65CCEC8E30746DA700093FF3 /* GraptionAudio */,
+				6CF0856F124649A4FFEEDDAD /* GraptionUI */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		65CCECB43074998900093FF3 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				65CCECB13074998900093FF3 /* Base.xcconfig */,
+				65CCECB23074998900093FF3 /* Local.xcconfig */,
+				65CCECB33074998900093FF3 /* Local.xcconfig.example */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		9835CF98306C55A900F6C1EC = {
 			isa = PBXGroup;
 			children = (
+				65CCECB43074998900093FF3 /* Config */,
 				9835CFA3306C55A900F6C1EC /* Graption */,
 				9835CFB0306C55AA00F6C1EC /* Base.xcconfig */,
 				9835CFA2306C55A900F6C1EC /* Products */,
+				65CCEC8D30746D9400093FF3 /* Packages */,
 			);
 			sourceTree = "<group>";
 		};
@@ -67,9 +126,15 @@
 				9835CFA3306C55A900F6C1EC /* Graption */,
 			);
 			name = Graption;
-            packageProductDependencies = (
-                A02900000000000000000003 /* GraptionCore */,
-            );
+			packageProductDependencies = (
+				A02900000000000000000003 /* GraptionCore */,
+				65CCECAF3074877500093FF3 /* GraptionAudio */,
+				1504F8340E9DC8A84ACE6184 /* GraptionUI */,
+				19DABF98307713050033A27A /* MediaPipeTasksAudio */,
+				19DABF9A307713050033A27A /* MediaPipeTasksVision */,
+				19DABF9D307713050033A27A /* GraptionVision */,
+				A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */,
+			);
 			productName = Graption;
 			productReference = 9835CFA1306C55A900F6C1EC /* Graption.app */;
 			productType = "com.apple.product-type.application";
@@ -98,11 +163,16 @@
 			);
 			mainGroup = 9835CF98306C55A900F6C1EC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A02900000000000000000002 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */,
+				65CCECAE3074877500093FF3 /* XCLocalSwiftPackageReference "Packages/GraptionAudio" */,
+				6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */,
+				19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */,
+				19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */,
+				A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9835CFA2306C55A900F6C1EC /* Products */;
-            packageReferences = (
-                A02900000000000000000002 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */,
-            );
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -126,20 +196,6 @@
 			);
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin XCLocalSwiftPackageReference section */
-        A02900000000000000000002 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */ = {
-            isa = XCLocalSwiftPackageReference;
-            relativePath = Packages/GraptionCore;
-        };
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-        A02900000000000000000003 /* GraptionCore */ = {
-            isa = XCSwiftPackageProductDependency;
-            productName = GraptionCore;
-        };
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		9835CFAA306C55AA00F6C1EC /* Debug configuration for PBXProject "Graption" */ = {
@@ -267,10 +323,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Graption needs camera access to analyze your face.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Graption uses your microphone to detect speech and provide live captions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -282,7 +341,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -299,10 +360,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Graption needs camera access to analyze your face.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Graption uses your microphone to detect speech and provide live captions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -314,7 +378,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				NEW_SETTING = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -345,6 +411,69 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A02900000000000000000002 /* XCLocalSwiftPackageReference "Packages/GraptionCore" */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/GraptionCore; };
+		19DABF9C307713050033A27A /* XCLocalSwiftPackageReference "Packages/GraptionVision" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionVision;
+		};
+		65CCECAE3074877500093FF3 /* XCLocalSwiftPackageReference "Packages/GraptionAudio" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionAudio;
+		};
+		6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionUI;
+		};
+		A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/GraptionNetwork;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google-ai-edge/mediapipe";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A02900000000000000000003 /* GraptionCore */ = {isa = XCSwiftPackageProductDependency; productName = GraptionCore; };
+		1504F8340E9DC8A84ACE6184 /* GraptionUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6CF0856E124649A4FFEEDDAC /* XCLocalSwiftPackageReference "Packages/GraptionUI" */;
+			productName = GraptionUI;
+		};
+		19DABF98307713050033A27A /* MediaPipeTasksAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */;
+			productName = MediaPipeTasksAudio;
+		};
+		19DABF9A307713050033A27A /* MediaPipeTasksVision */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 19DABF97307713050033A27A /* XCRemoteSwiftPackageReference "mediapipe" */;
+			productName = MediaPipeTasksVision;
+		};
+		19DABF9D307713050033A27A /* GraptionVision */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GraptionVision;
+		};
+		65CCECAF3074877500093FF3 /* GraptionAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GraptionAudio;
+		};
+		A1B2C3D4E5F60708090A0B04 /* GraptionNetwork */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F60708090A0B06 /* XCLocalSwiftPackageReference "Packages/GraptionNetwork" */;
+			productName = GraptionNetwork;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9835CF99306C55A900F6C1EC /* Project object */;
 	validationLevel = 1;

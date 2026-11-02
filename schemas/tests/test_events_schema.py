@@ -11,7 +11,7 @@ SCHEMA_PATH = Path(__file__).resolve().parents[1] / "events.schema.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
-BASE = {"session_id": "s-test", "schema_version": "1.1"}
+BASE = {"session_id": "s-test", "schema_version": "1.2"}
 CAPTION_ID = "3f1c2a9e-8b7d-4c6e-9a01-2b3c4d5e6f70"
 
 CAPTION = {
@@ -89,6 +89,33 @@ def test_example_is_valid(name):
     errors = list(VALIDATOR.iter_errors(EXAMPLES[name]))
     assert not errors, [e.message for e in errors]
 
+#Check that an audEERING tone result is valid without emotion probabilities
+#Three scores are arousal, valence, and dominance.
+def test_audeering_tone_result_without_probs_is_valid():
+    event = {
+        **BASE,
+        "type": "tone_result",
+        "caption_id": CAPTION_ID,
+        "tag": "excited",
+        "scores": {
+            "arousal": 0.72,
+            "valence": 0.61,
+            "dominance": 0.54,
+        },
+        "model_version": "audeering-baseline-v1",
+        "latency_ms": {"recv_to_send": 360},
+    }
+    #Checks that the schema accepts the audEERING output format.
+    assert VALIDATOR.is_valid(event)
+
+#Checks that the custom tone model's existing probability format is still valid
+def test_custom_tone_result_with_probs_is_valid():
+    #Reuse existing custom-model example, which contains the 6 emotion probabilities
+    #This ensures that the schema change still supports the original output format.
+    event = copy.deepcopy(EXAMPLES["tone_result"])
+
+    #checks that the custom-model output remains valid
+    assert VALIDATOR.is_valid(event)
 
 def _broken(name, mutate):
     event = copy.deepcopy(EXAMPLES[name])

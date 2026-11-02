@@ -41,7 +41,7 @@ The system lives in three places:
 
 ```
 iPHONE ────────────────────────────────────────────────────────────────
- Camera(15fps) → MediaPipe FaceLandmarker → FaceTracker → FeatureBuilder
+ Camera(15fps) → Vision face detector + MediaPipe FaceLandmarker → FaceTracker → FeatureBuilder
                                                             ↓ (15-frame window per face)
  Mic ─┬→ Loudness ─────────────────────────────────→ SpeakerModel (Core ML GRU)
       │                                                     ↓ score per face
@@ -86,7 +86,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 | Area | Choice |
 |---|---|
 | iOS app | Swift, SwiftUI, AVFoundation (capture), Core ML, URLSessionWebSocketTask |
-| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on the Mac), **same `.task` model file in both** |
+| Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), installed from the Google MediaPipe Swift package, **same `.task` model file in both** |
 | Transcription | WhisperKit (on-device Whisper). Start with `base.en`, benchmark `small.en` |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
@@ -153,7 +153,7 @@ The repo starts with only READMEs in most folders; each team creates the files a
 All timestamps are **seconds since session start, measured on the phone's monotonic host clock**. Convert camera and audio `CMSampleBuffer` presentation timestamps to host time. The Mac never generates timestamps used for alignment.
 
 ### Event schema (`schemas/events.schema.json`)
-Every event includes `type`, `session_id`, and `schema_version` (currently `"1.1"`).
+Every event includes `type`, `session_id`, and `schema_version` (currently `"1.2"`).
 
 **On-device (Swift types, generated from the schema):**
 ```jsonc
@@ -192,7 +192,7 @@ Every event includes `type`, `session_id`, and `schema_version` (currently `"1.1
 {
   "type": "session_error",
   "session_id": "demo",
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "code": "invalid_json",
   "message": "Invalid JSON at line 1, column 1: Expecting value",
   "request": "not json",
@@ -205,9 +205,9 @@ The connection stays open after request errors, so the client can correct and re
 frames are echoed as base64 with `request_encoding: "base64"`. These replies are sent
 only to the originating client and must never enter server logs or storage. Authentication
 failures still reject the handshake. Version 1.1 adds `session_error`; clients must use
-`schema_version: "1.1"` in all events. Pydantic types live in `server/app/events.py` and
+`schema_version: "1.2"` in all events. Pydantic types live in `server/app/events.py` and
 Swift types in `apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`, generated with
-`npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events
+`npx quicktype@23.2.6 -s schema schemas/events.schema.json --lang swift --top-level Events --access-level public
 --density normal -o apps/ios/Packages/GraptionCore/Sources/GraptionCore/Events.swift`.
 
 Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a later optimization.
@@ -217,16 +217,35 @@ Base64 JSON is fine for the MVP (~130 KB for a 3s segment). Binary frames are a 
 ## 6. iOS app spec
 
 **Capture**
-- Camera: `AVCaptureSession`, 15 fps, 720p is plenty. Back camera by default; handle front-camera mirroring explicitly.
+- Camera: `AVCaptureSession`, 15 fps, 720p is plenty. Back camera by default. The preview has a flip control for the front camera. The front-camera preview and the analyzed frames are both mirrored, so face boxes stay on the face.
+- Orientation: portrait and landscape. The analyzed buffers are rotated to the preview's horizon-level angle (`AVCaptureDevice.RotationCoordinator`), so faces are always upright and landmarks are in on-screen coordinates. The frame's aspect ratio therefore changes with orientation (9:16 or 16:9), so features must not depend on it (see FeatureBuilder).
 - Mic: `AVAudioEngine` tap, resampled to **16 kHz mono float32**, in ~20 ms buffers.
 
-**MediaPipe Face Landmarker**
-- `LIVE_STREAM` mode, `numFaces = 4`, `outputFaceBlendshapes = true`, `outputFacialTransformationMatrixes = true`.
-- Run on the **full frame**, never on crops. This must match training.
+**Face detection (Apple Vision)**
+- `VNDetectFaceRectanglesRequest` (revision 3) on every frame, up to 4 faces, largest first. These boxes drive the tracker.
+- Why not MediaPipe's detector: `face_landmarker.task` bundles the *short-range* BlazeFace, which downsamples the whole frame to 128 px and misses faces beyond roughly arm's length. Vision is free, offline, runs on the Neural Engine, and finds faces across a room.
 
-**FaceTracker**
-- Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback.
-- Drop a track after 1s unseen. IDs are `f1`, `f2`, … per session.
+**MediaPipe Face Landmarker: two modes, face crops currently selected**
+
+For now the app has two ways to get landmarks, chosen by `LandmarkMode`. **`faceCrops` is currently selected.** Both use the Vision boxes above for detection and tracking; they differ only in what MediaPipe sees.
+
+| Mode | What MediaPipe runs on | Far faces | Cost |
+|---|---|---|---|
+| `faceCrops` (**selected**) | A 256×256 crop, 2.2× the face size, around each Vision face. `IMAGE` mode, `numFaces = 2`, keep the mesh nearest the crop center | Boxes **and** landmarks | One small MediaPipe run per face |
+| `fullFrame` | The whole frame, once. `VIDEO` mode (synchronous `LIVE_STREAM`, same cross-frame tracking), `numFaces = 4`; each mesh is attached to the Vision box containing its nose tip | Boxes only, no landmarks | One MediaPipe run per frame |
+
+- In both modes landmarks are returned in full-frame normalized coordinates, so FeatureBuilder and everything downstream are unaffected by the choice.
+- `outputFaceBlendshapes` and `outputFacialTransformationMatrixes` stay off until FeatureBuilder consumes them.
+- **Training must match the selected mode.** With `faceCrops` selected, `ml/asd` extraction must crop the same way (2.2×, 256 px) around the AVA face boxes instead of running on full frames (see §8). Until it does, train/test landmarks differ slightly. Features are nose-centered and divided by inter-ocular distance, so the expected drift is small, but it hasn't been measured. Head pose from the transformation matrix assumes the full camera view, so compute pose from full-frame landmarks (or crop identically in training) before enabling matrices.
+- **Switching modes:** edit one line in `CameraController` in `apps/ios/Graption/CameraView.swift`, `FaceCaptureEngine(landmarkMode: .faceCrops)` → `.fullFrame` (or back), rebuild, and update this section and the extraction to match.
+
+**FaceTracker** (`GraptionVision/FaceTracker.swift`, unit-tested with `swift test`)
+- Greedy IoU matching of the current frame's faces to existing tracks (IoU ≥ 0.3), then a centroid-distance fallback (within 1.5× the face size) for fast movers.
+- Boxes are smoothed with a One Euro filter. A missed face coasts on its last velocity and is still shown for 2 frames, without landmarks.
+- Drop a track after 2s unseen; until then a returning face gets its old ID back. (Was 1s; on-device testing showed turning the head away and back often takes longer, and the face came back with a new ID. Tradeoff: someone new stepping into the same spot within 2s inherits the ID.) IDs are `f1`, `f2`, … per session, never reused; they restart when the camera stops. Rotating the phone forgets all tracks (their boxes are in the old orientation), so faces get new IDs.
+
+**Speaker guess (until SpeakerModel ships)**
+- `LargestFaceScorer` implements the `SpeakerScorer` protocol: the largest face gets `p = 1`, the rest `0`. The camera view labels that face "talking" and draws it green. The Core ML model replaces it behind the same protocol.
 
 **FeatureBuilder**
 Must match `ml/common/features.py` exactly: same order, same normalization. It produces one vector per face per frame:
@@ -247,9 +266,21 @@ Must match `ml/common/features.py` exactly: same order, same normalization. It p
 **VAD**
 - Emits segments with `caption_id` (UUID) and `t_start`/`t_end`.
 - End a segment after 500 ms of silence; force-split at 10s.
+- Keep up to 300 ms of preceding idle audio in memory and prepend it on activation
+  to preserve quieter word beginnings. Move t_start back by the retained sample duration;
+  the 10-second cap includes pre-roll. Clear the buffer on segment completion, Stop,
+  reset, or calibration; never emit an idle-only segment. This cannot recover speech
+  missed entirely by the energy threshold.
 - Start energy-based, then switch to Silero.
+- Tapping listen calibrates automatically for 3 seconds. A centered countdown says "Calibrating",
+  shows 3, 2, 1, and "Keep the room quiet", then captions start. Threshold = max(0.001, 2 × the 90th-percentile RMS of fixed 20 ms windows)
+  from that stretch. At least 2 seconds of audio are required; otherwise the previous threshold
+  is kept. Calibration emits no segments, stores no audio, and applies only for the current app
+  instance. This provisional energy heuristic can miss quiet speech and does not distinguish
+  speech from noise.
 
 **WhisperKit**
+- First launch with no local model shows a blank Install base.en page that says Wi-Fi is needed. Later launches load the local copy and caption offline.
 - Transcribes each segment with word timestamps enabled.
 - Emits a `caption` with `speaker_id` pending.
 - Stretch goal: streaming partial captions.
@@ -268,6 +299,12 @@ for caption [t0, t1]:
 - Filter to an allowlist: doorbell, knock, smoke/fire alarm, siren, dog bark, baby cry, laughter, phone ring.
 - Confidence ≥ 0.7, with a 3s cooldown per label.
 - Verify the exact label strings from `knownClassifications`.
+  The verified mapping (Apple identifier → alert label) lives in `SoundAlertFilter.labels`, and a test checks it.
+- The combined A2/A3 demo uses one microphone capture: continuous converted samples
+  feed SoundAnalysis independently of VAD; onSegment feeds transcription, while
+  onSoundAlert feeds an alert-only presentation model. During calibration, sound
+  classification may run but alert presentation/announcements are suppressed.
+- Window 1 s with 50% overlap (Apple's default is 3 s, too slow for the ≤ 1 s alert lag target).
 
 **ToneClient**
 - Sends a `tone_request` per segment and receives `tone_result`.
@@ -275,6 +312,17 @@ for caption [t0, t1]:
 
 **UI**
 - Live caption list, with the speaker name/color matching a highlight box drawn on that face.
+- Combined A2/A3 demo places matching large Start/Stop listening and calibration
+  controls above the caption feed, with sound banners, haptics, and accessibility
+  announcements. Stop clears the current banner while pending captions finish.
+- Temporary A2 demo shows newest completed captions first, in dark-grey cards with
+  a consistent-width, Dynamic Type-scaled time column, caption text beside it, and
+  small "Transcription latency" below the text (ASR duration, excluding queue/VAD wait).
+  Hide [BLANK_AUDIO] markers from presentation, retaining raw ASR output in debugger logs;
+  omit marker-only results regardless of duration. Empty ASR results from
+  segments shorter than 1 second (including retained silence) are logged to the
+  debugger but hidden on screen; short recognized speech remains visible. This is
+  display filtering, not spike rejection or reliable no-speech detection.
 - Tone tag chip; sound alert banners (visual plus haptic).
 - Large and dynamic type, high contrast. Follow Apple's Accessibility HIG.
 
@@ -291,7 +339,9 @@ for caption [t0, t1]:
   Tone is optional; late results update the same saved session by caption ID without delaying end.
   Save errors retain the transcript for retry. History loading reports corrupt or unsupported
   files as an error instead of silently returning an empty history.
-- The app currently has no live ASR/session pipeline. Debug builds provide **Start Fake Session**
+- The app has a live ASR pipeline, but persistence is not yet wired to live capture.
+  The **Saved sessions** sheet is available from the live and model-install screens.
+  Debug builds provide **Start Fake Session**
   and **End Session & Save**, plus saved-transcript inspection/reload to verify persistence
   across termination. Future capture wiring must call `append`, `applyTone`, and `end` on the
   session recorder. The full dashboard and summaries remain later work.
@@ -327,8 +377,9 @@ for caption [t0, t1]:
   replies to each schema-v1.1 `tone_request` with a matching `tone_result`, `tag: null`,
   zero probabilities (no prediction), and `model_version: "tone-stub-v1"` through
   `MockToneBackend`. `caption_log` is accepted and discarded until logging is implemented.
-  Audio stays in memory only. Real inference, SQLite logging, and deployment packaging
-  remain later work; the skeleton always uses the stub regardless of `TONE_BACKEND`.
+  Audio stays in memory only. `TONE_BACKEND=audeering` swaps in the real audEERING baseline
+  (A6, `server/app/audeering.py`); the default is still the stub (`mock`). SQLite logging and
+  deployment packaging remain later work.
   Invalid session messages return `session_error` and keep the connection open. Rejection
   warnings contain only a fixed rejection code, generated connection ID, and backend model version. The response
   echoes the received request to its originating client; it is never stored or logged.
@@ -349,12 +400,14 @@ for caption [t0, t1]:
   3. Learned softmax-weighted sum over the 13 layers, then mean-pool over time, giving a 768-dim vector.
   4. Head: `Linear(768,256) → ReLU → Dropout(0.3) → Linear(256,6) → softmax`.
   5. Tag mapper: `tag = argmax` if `max prob ≥ 0.6` and the argmax isn't `neutral`; otherwise `null`.
-- **Week-1 baseline mode** (`TONE_BACKEND=audeering`): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds:
-  - arousal > 0.65 and valence > 0.55 → `excited`
-  - arousal > 0.65 and valence < 0.4 → `upset`
-  - arousal < 0.3 → `calm`
-  - otherwise `null`
-- **Config (env vars):** `TONE_BACKEND` (`audeering` | `custom`), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
+- **Week-1 baseline mode** (`TONE_BACKEND=audeering`, implemented): the audEERING model outputs arousal, valence, and dominance in [0,1]. Map them with tunable thresholds (`AudeeringThresholds` in `server/app/tone.py`). These are the values tuned on team recordings in A4 (`ml/tone/DISCUSSION_LOG.md`), replacing the original 0.65/0.55/0.4/0.3 guesses:
+  - arousal > 0.64 and valence > 0.45 → `excited`
+  - arousal > 0.47 and valence < 0.4 → `upset`
+  - 0.38 < arousal < 0.48 and valence > 0.45 → `calm`
+  - otherwise `null`; segments under 0.5 s are always `null`
+  - `probs` are all zero in this mode: the schema's 6 emotions don't apply to arousal/valence.
+  - Weights load from the local Hugging Face cache (`uv run hf download audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`); torch, transformers, and scipy come from the uv workspace (`graption-ml`), not `graption-server`'s own dependencies.
+- **Config (env vars):** `TONE_BACKEND` (`mock` default | `audeering` | `custom` later), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
 - **CPU performance:** the audEERING baseline is the large wav2vec2 variant (~165M params) and may be slow on CPU. Benchmark per-sentence latency on Cloud Run before user testing. If it's over ~1s, use the custom WavLM-base head in cloud mode.
 - **SQLite tables:** `sessions`, `captions` (from `caption_log`), `tone_results` (probs, model_version, latency).
   - Cloud Run disks are ephemeral, so in cloud mode, export the SQLite file to `LOG_EXPORT_BUCKET` at session end.
@@ -383,7 +436,7 @@ for caption [t0, t1]:
 
 **Extraction (Mac)**
 1. Resample the video to 15 fps and extract 16 kHz audio.
-2. Run MediaPipe in **VIDEO** mode on full frames, with the same `.task` file as the app.
+2. Run MediaPipe with the same `.task` file as the app, in the **same `LandmarkMode` as the app** (§6). With `faceCrops` (currently selected): crop 2.2× around each AVA face box, resize to 256×256, run `IMAGE` mode, map landmarks back to full-frame coordinates. With `fullFrame`: **VIDEO** mode on full frames.
 3. Match each MediaPipe face to AVA boxes by IoU ≥ 0.5 and take that box's label. Drop unmatched faces.
 4. Compute the 96-dim features via `ml/common/features.py`.
 5. Build 15-frame windows (stride 1 for training).

@@ -1,12 +1,15 @@
 # apps/ios: Graption iOS app
 
-Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). The app has a camera screen and a local saved-transcript demo.
+Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). The app provides live captions,
+sound alerts, a camera screen, and a local saved-transcript demo.
 Mac + Xcode required; GraptionCore requires Swift 6.0+.
 
 ## Run it (first time, each developer)
 1. Xcode → **Settings → Accounts** → **+** → sign in with your Apple ID (free is fine).
 2. `cp apps/ios/Config/Local.xcconfig.example apps/ios/Config/Local.xcconfig` and fill in
-   `DEVELOPMENT_TEAM` (your 10-character team ID) and `DEV_SUFFIX` (your name). This file is
+   `DEVELOPMENT_TEAM` (your 10-character team ID) and `DEV_SUFFIX` (your name). Add `TONE_URL`
+   (for example, `ws:/$()/<mac-lan-ip>:8000`; the unusual spelling avoids xcconfig treating `//` as a comment)
+   and `TONE_TOKEN` only when testing the tone server. This file is
    gitignored. It exists because two free Apple IDs can't share one bundle ID.
 3. Open `apps/ios/Graption.xcodeproj`. Pick a simulator and press ⌘R.
 4. On your iPhone: plug in → **Trust** → Settings → Privacy & Security → **Developer Mode** on →
@@ -42,9 +45,68 @@ apps/ios/
 Add a package with **File → New → Package…** saved into `apps/ios/Packages/`, then add it to the
 Graption target under **General → Frameworks, Libraries, and Embedded Content**.
 
-## Before adding real features (unverified)
-- MediaPipe's iOS SDK is distributed through CocoaPods (`MediaPipeTasksVision`), probably not SwiftPM,
-  so the MediaPipe wrapper may need to live in the app target behind a protocol.
+## MediaPipe Face Landmarker V1
+
+Google's current iOS setup guide supports Swift Package Manager. Use it for this project:
+
+1. In Xcode with Graption.xcodeproj opened, choose **File -> Add Package Dependencies...**.
+2. Add `https://github.com/google-ai-edge/mediapipe` and select the `MediaPipeTasksVision`
+    product for the `Graption` target. `MediaPipeTasksCommon` is included automatically.
+      - There is a chance that MediaPipeTasksVision doesnt get caught, in that case reinstall
+      the package setting the dependency Rule to Branch and typing in master in the box to the
+      right. It should show after this
+3. Download Google's Face Landmarker model bundle from the [Face Landmarker models]
+    (https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/index#models)
+    documentation. Add the downloaded `face_landmarker.task` to the `Graption` target's app
+    resources. The file is ignored by git, so every developer downloads it locally.
+      - Just drag and drop into the blue folder on xcode - the file name must be the exact same
+      and show up under copy bundle resources in build phases when Graption app is targeted.
+4. Add `NSCameraUsageDescription` to the app target's Info.plist. The generated Info.plist
+    setting can be supplied as `INFOPLIST_KEY_NSCameraUsageDescription` in the target build
+    settings.
+   - Target: Graption -> Info -> Click plus on the last item in Custom iOS Target Properties
+     -> Select: Privacy - Camera Usage Description -> on the right field enter the message
+     (ex. Graption needs camera access to analyze your face.)
+5. Build from Xcode once so SPM resolves the package. A physical iPhone is required for the
+    live camera result; the simulator cannot provide a useful camera test.
+   - All the set up for connecting a device with ICloud needs to be done for this
+The older Face Landmarker page also documents CocoaPods, but SPM is the current project setup
+path and avoids introducing a `Podfile` and generated workspace into this repository.
+
+V1 implementation contract:
+
+- Capture the back camera with `AVCaptureSession` at up to 1080p and 15 fps, using continuous
+   autofocus, exposure, and white balance. Portrait and landscape both work:
+   `AVCaptureDevice.RotationCoordinator` gives one horizon-level angle that is applied to both the
+   preview and the analyzed buffers, so boxes line up with the screen and faces stay upright for
+   Vision and MediaPipe. Tracks reset when the angle changes.
+- Detect faces with Apple Vision (`VNDetectFaceRectanglesRequest`), which finds faces across a
+   room. MediaPipe's bundled short-range detector only finds faces within about arm's length.
+- There are two landmark modes for now, chosen by `LandmarkMode`. **`.faceCrops` is currently
+   selected**:
+   - `.faceCrops` (selected): runs `FaceLandmarker` in `.image` mode on a 256×256 crop around
+     each Vision face, so far faces get landmarks too. Costs one small MediaPipe run per face.
+   - `.fullFrame`: runs `FaceLandmarker` once per frame on the whole frame in `.video` mode with
+     `numFaces = 4` and attaches each mesh to the Vision box containing its nose tip. Far faces
+     are tracked but get no landmarks.
+   - To switch, change `FaceCaptureEngine(landmarkMode: .faceCrops)` in `CameraController`
+     (`Graption/CameraView.swift`) to `.fullFrame` and rebuild. ASD training extraction must use
+     the same mode; see `docs/GRAPTION_CONTEXT.md` §6.
+   - Blendshapes and transformation matrices stay disabled until a consumer needs them.
+- All inference runs synchronously on one video queue with `alwaysDiscardsLateVideoFrames`, so
+   frames that arrive while busy are dropped and latency never queues up.
+- Tracks are matched greedily by center distance, smoothed with a One Euro filter, keep stable
+   IDs, and coast for at most two missed frames. The overlay draws a solid box for faces with
+   landmarks and a dashed box for faces that were detected but have no mesh. It accounts for the
+   preview's aspect-fill crop.
+- Keep camera capture and MediaPipe behind the planned `GraptionVision` boundary so the later
+   tracker and speaker model can consume the same per-frame results.
+
+Official references: [MediaPipe iOS setup]
+(https://developers.google.com/edge/mediapipe/solutions/setup_ios) and [Face Landmarker iOS]
+(https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/ios).
+
+WhisperKit is SwiftPM (`argmaxinc/WhisperKit`).
 - WhisperKit is SwiftPM (`argmaxinc/WhisperKit`).
 - Minimum iOS is 17.0 for now; lower it if a team phone can't run 17. On-device summaries need iOS 26+.
 
@@ -71,7 +133,7 @@ History is newest-first. Corrupt/unsupported files surface a load error.
 ### Manual acceptance test (simulator or iPhone)
 
 1. Run the **Debug** scheme from Xcode. No tone server, microphone, or models are needed.
-2. Tap **Start Fake Session**. Expect three captions from `f1`, `f2`, and **Someone**;
+2. Open **Saved sessions**, then tap **Start Fake Session**. Expect three captions from `f1`, `f2`, and **Someone**;
    the first has tone `happy`, the others have no tone. The fake times run from 0 to 7 seconds.
 3. Tap **End Session & Save**. A session with **3 captions** appears under Saved sessions.
 4. Open it and verify all text, speakers, tone, and start/end times.
@@ -81,8 +143,8 @@ History is newest-first. Corrupt/unsupported files surface a load error.
    to exercise a fresh disk read. Repeat with another fake session; both should remain.
 7. Repeat in airplane mode to confirm storage is fully offline.
 
-The demo is Debug-only. The existing camera screen is independent: closing it does not
-create a caption session yet. Force-quitting an active, unended session does not save it.
+The fake-session demo is Debug-only. Live caption capture remains independent and does not
+save a caption session yet. Force-quitting an active, unended session does not save it.
 Uninstalling the app removes its locally saved sessions.
 
 ### Automated verification
