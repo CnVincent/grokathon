@@ -1,14 +1,12 @@
 import Foundation
 
-public class SessionClock {
-    private let startTime: Date
+public final class SessionClock {
+    private let startTime = ProcessInfo.processInfo.systemUptime
 
-    public init() {
-        self.startTime = Date()
-    }
+    public init() {}
 
-    /// Returns the number of seconds elapsed since this clock instance was initialized.
+    /// Seconds since session start on the phone's monotonic clock.
     public var secondsElapsed: TimeInterval {
-        return Date().timeIntervalSince(startTime)
+        ProcessInfo.processInfo.systemUptime - startTime
     }
 }

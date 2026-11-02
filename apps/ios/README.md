@@ -1,7 +1,8 @@
 # apps/ios: Graption iOS app
 
-Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). Right now it's a debug screen:
-**Start listening** prints speech segments (A1) and shows sound alerts (A3). Mac + Xcode required.
+Spec: `docs/GRAPTION_CONTEXT.md` §6 (app) and §14 (workflow). The app provides live captions,
+sound alerts, a camera screen, and a local saved-transcript demo.
+Mac + Xcode required; GraptionCore requires Swift 6.0+.
 
 ## Run it (first time, each developer)
 1. Xcode → **Settings → Accounts** → **+** → sign in with your Apple ID (free is fine).
@@ -52,7 +53,7 @@ Google's current iOS setup guide supports Swift Package Manager. Use it for this
 2. Add `https://github.com/google-ai-edge/mediapipe` and select the `MediaPipeTasksVision`
     product for the `Graption` target. `MediaPipeTasksCommon` is included automatically.
       - There is a chance that MediaPipeTasksVision doesnt get caught, in that case reinstall
-      the package setting the dependency Rule to Branch and typing in master in the box to the 
+      the package setting the dependency Rule to Branch and typing in master in the box to the
       right. It should show after this
 3. Download Google's Face Landmarker model bundle from the [Face Landmarker models]
     (https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker/index#models)
@@ -64,7 +65,7 @@ Google's current iOS setup guide supports Swift Package Manager. Use it for this
     setting can be supplied as `INFOPLIST_KEY_NSCameraUsageDescription` in the target build
     settings.
    - Target: Graption -> Info -> Click plus on the last item in Custom iOS Target Properties
-     -> Select: Privacy - Camera Usage Description -> on the right field enter the message 
+     -> Select: Privacy - Camera Usage Description -> on the right field enter the message
      (ex. Graption needs camera access to analyze your face.)
 5. Build from Xcode once so SPM resolves the package. A physical iPhone is required for the
     live camera result; the simulator cannot provide a useful camera test.
@@ -113,3 +114,48 @@ WhisperKit is SwiftPM (`argmaxinc/WhisperKit`).
 - Verify with `xcodebuild` / `swift test`, not "looks right".
 - Event types are generated from `schemas/events.schema.json`, not hand-written.
 - No secrets in the repo: they go in the gitignored `Local.xcconfig`.
+
+## Caption persistence (issue #29)
+
+`GraptionCore` exposes `SavedCaption`, `SavedSession`, `SessionStore`, `FileSessionStore`,
+and `SessionRecorder`. Create a recorder at session start, call `append` with each final
+caption as it renders, route tone responses to `applyTone(captionID:tag:modelVersion:)`,
+and call `try await end()` when capture ends. Captions save immediately with optional tone;
+a late tone updates the same file. If a save fails, keep the recorder and retry `end()`.
+Caption offsets use the phone's monotonic session clock; `startedAt` is only a display date.
+These are local storage types, not a replacement for the generated event contract.
+
+The default store writes atomic, versioned JSON to `Library/Application Support/Sessions/`
+in the app sandbox, excludes it from backups, and uses complete file protection on iOS.
+It accepts only transcript records; it has no audio/video field or raw-event save API.
+History is newest-first. Corrupt/unsupported files surface a load error.
+
+### Manual acceptance test (simulator or iPhone)
+
+1. Run the **Debug** scheme from Xcode. No tone server, microphone, or models are needed.
+2. Open **Saved sessions**, then tap **Start Fake Session**. Expect three captions from `f1`, `f2`, and **Someone**;
+   the first has tone `happy`, the others have no tone. The fake times run from 0 to 7 seconds.
+3. Tap **End Session & Save**. A session with **3 captions** appears under Saved sessions.
+4. Open it and verify all text, speakers, tone, and start/end times.
+5. Stop the app in Xcode or force-quit it in the app switcher. Launch it again without
+   uninstalling it or resetting simulator data. The saved session should appear automatically.
+6. Open the same transcript and verify the same three captions. Tap **Reload Saved Sessions**
+   to exercise a fresh disk read. Repeat with another fake session; both should remain.
+7. Repeat in airplane mode to confirm storage is fully offline.
+
+The fake-session demo is Debug-only. Live caption capture remains independent and does not
+save a caption session yet. Force-quitting an active, unended session does not save it.
+Uninstalling the app removes its locally saved sessions.
+
+### Automated verification
+
+```bash
+swift test --package-path apps/ios/Packages/GraptionCore
+xcodebuild -project apps/ios/Graption.xcodeproj -scheme Graption \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+Tests cover persistence through a new store instance, every caption field, the complete
+JSON field allowlist, absent tone, late tone, duplicate/repeated saves, empty sessions,
+sort order, invalid timings, failed-save retry, and corrupted JSON. They use temporary
+folders and synthetic text; they never capture audio.

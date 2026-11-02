@@ -330,6 +330,21 @@ for caption [t0, t1]:
 - Lists saved sessions. Each shows its caption log (speaker, text, tone tag) and an AI summary/notes (section 10).
 - Stores caption text, speakers, tags, and timings **on-device only**. Never audio or video.
 - Works offline. Summaries that need a model the device lacks are simply unavailable.
+- **Caption persistence implemented (issue #29):** `GraptionCore.SessionRecorder` collects
+  caption records and atomically saves a completed session through `SessionStore`.
+  `FileSessionStore` uses one versioned JSON file per session in private Application Support
+  (`Sessions/`), excluded from device/iCloud backups and protected while the phone is locked.
+  Records contain session ID/date/duration and caption ID/text/speaker/tone/times/model versions;
+  no audio, video, raw network events, or echoed error requests are accepted by this API.
+  Tone is optional; late results update the same saved session by caption ID without delaying end.
+  Save errors retain the transcript for retry. History loading reports corrupt or unsupported
+  files as an error instead of silently returning an empty history.
+- The app has a live ASR pipeline, but persistence is not yet wired to live capture.
+  The **Saved sessions** sheet is available from the live and model-install screens.
+  Debug builds provide **Start Fake Session**
+  and **End Session & Save**, plus saved-transcript inspection/reload to verify persistence
+  across termination. Future capture wiring must call `append`, `applyTone`, and `end` on the
+  session recorder. The full dashboard and summaries remain later work.
 
 **Debug mode**
 - Records a session: video file, per-frame `FeatureBuilder` vectors (JSONL), audio WAV, and all events.
@@ -580,6 +595,8 @@ If the device is overloaded, degrade in this order:
 - **Tone never blocks captions,** and tone tags only show when confident. A wrong tag is worse than none for DHH users.
 - **Recoverable request errors (schema v1.1):** return descriptive `session_error` messages with the received request so manual clients can correct mistakes without reconnecting. Never log or store the echoed payload.
 - **Rule-based fusion before learned fusion:** it produces the logged data a learned version would need.
+- **Toolchain baseline:** the project uses Xcode 16-compatible format (77), iOS 17+, and
+  GraptionCore uses Swift tools 6.0 so it builds with the installed Xcode 26 toolchain.
 - **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
 - **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an API key must never ship in the app.

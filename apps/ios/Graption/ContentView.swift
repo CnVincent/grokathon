@@ -5,6 +5,7 @@ import GraptionUI
 
 @MainActor
 struct ContentView: View {
+    @State private var showSavedSessions = false
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
@@ -68,6 +69,18 @@ struct ContentView: View {
                     Task { await prepareModel(allowDownload: true) }
                 }
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                showSavedSessions = true
+            } label: {
+                Label("Saved sessions", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.borderedProminent)
+            .padding()
+        }
+        .sheet(isPresented: $showSavedSessions) {
+            SavedSessionsView()
         }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
@@ -301,4 +314,3 @@ private struct CaptionEntry: Identifiable {
     let transcriptionSeconds: TimeInterval
     var id: UUID { result.captionID }
 }
-
