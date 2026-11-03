@@ -6,8 +6,9 @@ section before changing anything. If code and the doc disagree, or a request con
 doc, say so. Don't silently diverge. If a decision changes, update the doc in the same PR.
 
 ## Hard constraints
-- Captions, speaker highlighting, and sound alerts work **fully offline** on the iPhone.
-  Only tone tags may depend on a server.
+- Captions, speaker highlighting, and sound alerts work **fully offline** on the iPhone
+  via WhisperKit. Tone tags and the optional online Grok caption boost may depend on a
+  server. Online captions are off by default and require consent.
 - **iOS only.** Minimal budget: everything must work without paid items (Apple dev account,
   OpenAI, cloud credits).
 - **Tone never blocks captions.** Captions render immediately; tone arrives later by `caption_id`.
@@ -16,7 +17,7 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
 - **No secrets, datasets, weights, or recordings in git.** Secrets in `.env` / `.xcconfig`
   (gitignored); data in the team's shared Drive; model artifacts in W&B.
 - **OpenAI is never called from the iOS app.** Only from `language/` benchmark scripts.
-- The only cloud piece is the optional tone server. Training runs locally on team Macs.
+- The only cloud piece is the optional tone/STT server. Training runs locally on team Macs.
 
 ## Conventions
 - **Interfaces first:** every model sits behind a protocol/class (`SpeakerScorer`, `ToneBackend`)

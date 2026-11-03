@@ -20,6 +20,9 @@ public final class MicrophoneCapture {
 
     public var onSegment: ((AudioSegment) -> Void)?
     public var onSoundAlert: ((SoundAlert) -> Void)?
+    public var onSamples: (([Float]) -> Void)? {
+        didSet { syncOnSamplesToWorker() }
+    }
     public var onError: ((Error) -> Void)?
 
     // The sound detector shares the same converted mic stream
@@ -105,6 +108,7 @@ public final class MicrophoneCapture {
             )
 
             self.worker = worker
+            syncOnSamplesToWorker()
 
             // Approximately 20 ms in the microphone's native format.
             let bufferSize = AVAudioFrameCount(
@@ -204,6 +208,17 @@ public final class MicrophoneCapture {
 
         return copy
     }
+
+    private func syncOnSamplesToWorker() {
+        guard let worker else { return }
+        if onSamples != nil {
+            worker.setOnSamples { [weak self] samples in
+                self?.onSamples?(samples)
+            }
+        } else {
+            worker.setOnSamples(nil)
+        }
+    }
 }
 
 // The copied buffer is transferred to the processing queue.
@@ -228,6 +243,8 @@ private final class AudioWorker: @unchecked Sendable {
 
     private let deliver: @MainActor @Sendable (AudioSegment) -> Void
     private let reportError: @MainActor @Sendable (Error) -> Void
+    private let onSamplesLock = NSLock()
+    private var onSamples: (@MainActor @Sendable ([Float]) -> Void)?
 
     private var streamStart: TimeInterval?
     private var outputSampleCount = 0
@@ -249,6 +266,7 @@ private final class AudioWorker: @unchecked Sendable {
         self.sessionStartHostTime = sessionStartHostTime
         self.deliver = deliver
         self.reportError = reportError
+        self.onSamples = nil
 
         // Alerts don't wait for a VAD segment to finish.
         soundDetector?.start { alert in
@@ -290,6 +308,12 @@ private final class AudioWorker: @unchecked Sendable {
 
     func completeCalibration() throws -> Float {
         try queue.sync { try vad.completeCalibration() }
+    }
+
+    func setOnSamples(_ callback: (@MainActor @Sendable ([Float]) -> Void)?) {
+        onSamplesLock.lock()
+        onSamples = callback
+        onSamplesLock.unlock()
     }
 
     private func process(_ captured: CapturedBuffer) throws {
@@ -373,6 +397,15 @@ private final class AudioWorker: @unchecked Sendable {
                     tStart: timestamp
                 ) {
                     emit(segment)
+                }
+
+                onSamplesLock.lock()
+                let deliverSamples = onSamples
+                onSamplesLock.unlock()
+                if let deliverSamples {
+                    DispatchQueue.main.async {
+                        deliverSamples(samples)
+                    }
                 }
             }
 

@@ -9,9 +9,12 @@ public struct SettingsScreen: View {
 
     @AppStorage("macServerAddress") private var savedServerAddress: String = ""
     @AppStorage("toneTagsEnabled") private var toneTagsEnabled: Bool = true
+    @AppStorage("onlineCaptionsEnabled") private var onlineCaptionsEnabled: Bool = false
+    @AppStorage("onlineCaptionConsent") private var onlineCaptionConsent: Bool = false
 
     @State private var addressDraft: String = ""
     @State private var isAddressSaved: Bool = false
+    @State private var showOnlineConsent = false
     @FocusState private var isAddressFieldFocused: Bool
 
     @State private var showCameraPreview = false
@@ -47,6 +50,24 @@ public struct SettingsScreen: View {
             if let cameraPreviewDestination {
                 cameraPreviewDestination()
             }
+        }
+        .sheet(isPresented: $showOnlineConsent, onDismiss: {
+            if !onlineCaptionConsent {
+                onlineCaptionsEnabled = false
+            }
+        }) {
+            OnlineCaptionConsentView(
+                onAccept: {
+                    onlineCaptionConsent = true
+                    onlineCaptionsEnabled = true
+                    showOnlineConsent = false
+                },
+                onDecline: {
+                    onlineCaptionConsent = false
+                    onlineCaptionsEnabled = false
+                    showOnlineConsent = false
+                }
+            )
         }
     }
 
@@ -186,10 +207,47 @@ public struct SettingsScreen: View {
                     .foregroundStyle(Color.graptionSecondaryText)
             }
 
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Online captions")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Color.graptionAccent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+
+                    Spacer(minLength: 8)
+
+                    Toggle("Online captions", isOn: onlineCaptionsToggle)
+                        .labelsHidden()
+                        .tint(Color.graptionAccent)
+                }
+
+                Text("Stream live multilingual captions through the Graption server. Off by default; captions still work offline with on-device Whisper.")
+                    .font(.footnote)
+                    .foregroundStyle(Color.graptionSecondaryText)
+            }
+
             Text("Changes apply immediately and save automatically on this iPhone.")
                 .font(.footnote)
                 .foregroundStyle(Color.graptionSecondaryText)
         }
+    }
+
+    private var onlineCaptionsToggle: Binding<Bool> {
+        Binding(
+            get: { onlineCaptionsEnabled },
+            set: { newValue in
+                if newValue {
+                    if onlineCaptionConsent {
+                        onlineCaptionsEnabled = true
+                    } else {
+                        showOnlineConsent = true
+                    }
+                } else {
+                    onlineCaptionsEnabled = false
+                }
+            }
+        )
     }
 
     // Dev/debug entry point to the raw AVFoundation camera preview (not part
@@ -235,7 +293,7 @@ public struct SettingsScreen: View {
                 Text("Saved on this iPhone")
                     .font(.footnote.bold())
                     .foregroundStyle(Color.graptionAccent)
-                Text("Your server address and tone tag preference stay saved when you reopen Graption. No account or cloud sync needed.")
+                Text("Your server address, tone tag, and online-caption preferences stay saved on this iPhone. No account or cloud sync needed. Online captions send microphone audio to the Graption server only while that toggle is on.")
                     .font(.footnote)
                     .foregroundStyle(Color.graptionSecondaryText)
             }
