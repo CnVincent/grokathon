@@ -12,7 +12,9 @@ struct ContentView: View {
             sessionID: UUID().uuidString
         )
     )
-    @State private var soundAlertModel = SoundAlertModel()
+    @State private var soundAlertModel = SoundAlertModel(
+        contextClient: GrokSirenContextClient.fromAppConfiguration()
+    )
     @State private var hasPrintedLabels = false
     @State private var isVisible = false
     @State private var pipeline = CaptionPipeline()
@@ -34,6 +36,7 @@ struct ContentView: View {
     @State private var onlineBoostActive = false
     @State private var onlineCaptionID: UUID?
     @State private var grokModelVersion = ""
+    @State private var showSpeakSheet = false
 
     private var canListen: Bool {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
@@ -48,7 +51,8 @@ struct ContentView: View {
 
     private var bannerAlert: GraptionUI.SoundAlert? {
         guard let alert = soundAlertModel.currentAlert else { return nil }
-        return GraptionUI.SoundAlert(message: SoundAlertBanner.title(for: alert.label))
+        let message = soundAlertModel.contextLine ?? SoundAlertBanner.title(for: alert.label)
+        return GraptionUI.SoundAlert(message: message)
     }
 
     var body: some View {
@@ -69,12 +73,22 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
-                    isSettingUp: isPreparing
+                    isSettingUp: isPreparing,
+                    canSpeak: !isCalibrating && !isPreparing && !isStarting,
+                    onSpeak: { showSpeakSheet = true }
                 )
             } else {
-                InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
-                    Task { await prepareModel(allowDownload: true) }
-                }
+                InstallBaseEnPage(
+                    isInstalling: isPreparing,
+                    detail: setupFailed ? status : nil,
+                    install: { Task { await prepareModel(allowDownload: true) } },
+                    onSpeak: { showSpeakSheet = true }
+                )
+            }
+        }
+        .sheet(isPresented: $showSpeakSheet) {
+            SpeakReplySheet { draft in
+                try await speakReply(draft)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -90,6 +104,7 @@ struct ContentView: View {
             SavedSessionsView()
         }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
+        .animation(.default, value: soundAlertModel.contextLine)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
             new != nil
         }
@@ -267,6 +282,57 @@ struct ContentView: View {
         }
     }
 
+    /// Speaks a typed reply. Listening pauses so the phone does not caption its own speaker.
+    private func speakReply(_ draft: SpeakReplyDraft) async throws -> SpokenReply {
+        let resume = isRecording
+        if resume {
+            capture?.stop()
+            isRecording = false
+        }
+        defer {
+            guard resume else { return }
+            do {
+                try capture?.start()
+                isRecording = true
+                status = onlineBoostActive ? "Listening · online" : "Listening"
+            } catch {
+                report(error)
+            }
+        }
+
+        let player = ReplyAudioPlayer()
+        if let client = GrokSpeakingReplyClient.fromAppConfiguration() {
+            let audio = try await client.speak(
+                text: draft.text,
+                sourceLanguage: draft.sourceLanguage,
+                targetLanguage: draft.targetLanguage,
+                voiceID: draft.voiceID
+            )
+            let language = audio.translated ? audio.targetLanguage : audio.sourceLanguage
+            var usedServerAudio = false
+            do {
+                try await player.play(data: audio.audio)
+                usedServerAudio = true
+            } catch {
+                try await player.speak(text: audio.spokenText, language: language)
+            }
+            return SpokenReply(
+                spokenText: audio.spokenText,
+                translated: audio.translated,
+                modelVersion: audio.modelVersion,
+                usedServerAudio: usedServerAudio
+            )
+        }
+
+        try await player.speak(text: draft.text, language: draft.sourceLanguage)
+        return SpokenReply(
+            spokenText: draft.text,
+            translated: false,
+            modelVersion: "ios-speech",
+            usedServerAudio: false
+        )
+    }
+
     private func stopListening() {
         let wasCalibrating = isCalibrating
         isCalibrating = false
@@ -436,6 +502,7 @@ private struct InstallBaseEnPage: View {
     var isInstalling: Bool
     var detail: String?
     var install: () -> Void
+    var onSpeak: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -459,6 +526,11 @@ private struct InstallBaseEnPage: View {
                 }
                 .disabled(isInstalling)
                 .buttonStyle(.borderedProminent)
+                .tint(Color(red: 1, green: 149 / 255, blue: 0))
+                Button("Speak a reply") {
+                    onSpeak()
+                }
+                .buttonStyle(.bordered)
                 .tint(Color(red: 1, green: 149 / 255, blue: 0))
             }
             .padding(32)

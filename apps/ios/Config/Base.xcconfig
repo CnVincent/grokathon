@@ -17,6 +17,19 @@ TONE_TOKEN =
 INFOPLIST_KEY_GraptionToneURL = $(TONE_URL)
 INFOPLIST_KEY_GraptionToneToken = $(TONE_TOKEN)
 
+// Optional. Empty keeps siren and alarm banners on-device only.
+// Place and handles fall back to Fulton County / NWS / GTPD when blank.
+XAI_API_KEY =
+XAI_SIREN_PLACE =
+XAI_SIREN_HANDLES =
+INFOPLIST_KEY_GraptionXAIKey = $(XAI_API_KEY)
+INFOPLIST_KEY_GraptionSirenPlace = $(XAI_SIREN_PLACE)
+INFOPLIST_KEY_GraptionSirenHandles = $(XAI_SIREN_HANDLES)
+
+// Optional spoken-reply engine: tts (default) or voice (Grok Voice 3.0). Empty means tts.
+XAI_SPEECH_ENGINE =
+INFOPLIST_KEY_GraptionSpeechEngine = $(XAI_SPEECH_ENGINE)
+
 #include? "Local.xcconfig"
 
 INFOPLIST_KEY_NSMicrophoneUsageDescription = Graption uses your microphone to detect speech and provide live captions.

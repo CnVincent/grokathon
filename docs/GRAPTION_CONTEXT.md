@@ -16,11 +16,11 @@ Example output:
 
 ### Hard constraints
 - **Minimal budget.** Requested: Apple Developer Program ($99), OpenAI API credits ($50), cloud credits ($100). Build everything so it works **without** them; they only unlock user testing and benchmarking.
-- **Dev-first.** The core is a local dev setup. The only cloud piece is an optional hosted tone/STT server for remote user testing.
+- **Dev-first.** The core is a local dev setup. The only service we host is an optional tone/STT server for remote user testing. The phone may also call xAI, when a key is configured, to explain a siren or alarm and to speak a typed reply in another person's language.
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
-- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model, and the optional STT proxy).
-- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network via on-device WhisperKit. Tone tags and the optional online Grok caption boost may depend on a server (Mac or cloud). Online captions are off by default and require an explicit consent screen.
+- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model, and the optional STT proxy). Siren context and spoken replies, when a key is set, are xAI calls from the phone.
+- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network via on-device WhisperKit. Tone tags and the optional online Grok caption boost may depend on a server (Mac or cloud). Online captions are off by default and require an explicit consent screen. A siren or alarm banner still appears with no network; an optional explanation of why it is sounding may call xAI and arrives later. Uncertain explanations are dropped. A spoken reply is optional and never delays a caption. With no xAI key, the iPhone speaks the typed words and does not translate them.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
 ### Non-goals (semester one)
@@ -65,10 +65,10 @@ MAC / CLOUD ──────────────────────�
 4. WhisperKit transcribes the segment into a caption. This path stays running even when online captions are on, so fallback is immediate.
 5. Fusion picks the face with the highest average speaking score during that time window and attaches the caption to it.
 6. At the same time, the segment audio goes to the Mac. The tone model returns a tag for that caption ID, and the UI adds it.
-7. SoundAnalysis independently raises alerts such as "Doorbell."
-8. If the user has consented and turned on online captions, the phone also streams 16 kHz PCM to `/ws/stt`. The server proxies it to xAI `grok-voice-transcribe-2.0` (`XAI_API_KEY` is server-only; audio is not stored or logged). The UI shows streaming partials, prefixes a language code when the server detects one, and displays diarized speaker labels as Speaker N; combining them with face scores is later work.
+7. SoundAnalysis independently raises alerts such as "Doorbell." Siren and alarm banners render immediately. If an xAI key is set, the phone then asks Grok, with `x_search` limited to official accounts, why it is sounding. A confident answer updates that same banner. No audio is uploaded.
+8. If the user has consented and turned on online captions, the phone also streams 16 kHz PCM to `/ws/stt`. The server proxies it to xAI `grok-voice-transcribe-2.0` (the proxy's `XAI_API_KEY` stays on the server; audio is not stored or logged). The UI shows streaming partials, prefixes a language code when the server detects one, and displays diarized speaker labels as Speaker N; combining them with face scores is later work.
 
-**Rule:** tone never blocks captions. Captions render immediately, and tone arrives later as an update. The optional online Grok boost never blocks or replaces WhisperKit as a fallback: if the STT socket errors or drops, on-device captions show again immediately.
+**Rule:** tone never blocks captions. Captions render immediately, and tone arrives later as an update. The optional online Grok boost never blocks or replaces WhisperKit as a fallback: if the STT socket errors or drops, on-device captions show again immediately. Siren context never blocks the sound banner: the plain "Siren" or "Alarm" label is on screen first, and a confident explanation replaces that text later. Spoken replies never block captions either. The microphone pauses only while the reply is playing, so the phone does not caption its own speaker.
 
 ### Server deployment modes
 The same server code runs in three places. The app just points at a different URL. `/ws/session` is tone; `/ws/stt` is the optional Grok caption boost.
@@ -92,6 +92,8 @@ Long-term, the tone model moves on-device (Core ML). The STT proxy remains optio
 | Transcription | WhisperKit (on-device Whisper, default). Optional online boost: xAI `grok-voice-transcribe-2.0` via our `/ws/stt` proxy. Start with `base.en`, benchmark `small.en` |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
+| Siren context | xAI Responses API `x_search`, official handles only. Optional; key in `Local.xcconfig`. Empty key leaves the on-device banner |
+| Spoken replies | Same xAI key. Grok translates (`grok-4.7`, no tools), then Grok TTS speaks the translation. `XAI_SPEECH_ENGINE=voice` uses Grok Voice 3.0 instead of TTS. Empty key speaks the typed words on-device and does not translate |
 | Speaker model | PyTorch GRU, exported with `coremltools` to `.mlpackage` |
 | Tone model | `microsoft/wavlm-base-plus` (frozen) + custom MLP head, PyTorch on Mac (`mps`) |
 | Tone baseline | `audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim` (non-commercial license) |
@@ -120,7 +122,7 @@ graption/
 │       ├── GraptionVision/   # camera capture, MediaPipe wrapper, FaceTracker, FeatureBuilder, SpeakerModel
 │       ├── GraptionAudio/    # mic capture, Loudness, VAD, WhisperKit wrapper, SoundAnalysis
 │       ├── GraptionFusion/   # ScoreBuffer, Fusion
-│       ├── GraptionNetwork/  # ToneClient, GrokSTTClient
+│       ├── GraptionNetwork/  # ToneClient, GrokSTTClient, siren context (xAI x_search), spoken replies
 │       └── GraptionUI/       # caption views, alerts, past-meetings dashboard, debug recorder UI
 ├── server/                   # tone server (FastAPI): Mac, tunnel, or cloud
 │   ├── app/{main.py, ws.py, tone.py, tags.py, db.py, config.py, auth.py}
@@ -315,6 +317,24 @@ for caption [t0, t1]:
   classification may run but alert presentation/announcements are suppressed.
 - Window 1 s with 50% overlap (Apple's default is 3 s, too slow for the ≤ 1 s alert lag target).
 
+**Siren and alarm context**
+- The on-device banner still appears immediately, including with no network and with no API key: "Siren" or "Alarm". Other allowlisted sounds never call out.
+- When `XAI_API_KEY` is set, the phone calls `POST https://api.x.ai/v1/responses` (`grok-4.7`) with one tool, `x_search`. `allowed_x_handles` is official accounts only. The default list is NWS, NWSAtlanta, NWSSPC, GaTechPD, GTPDalerts, and Atlanta_Police (county tornado warnings are posted by NWS Atlanta; campus alerts by GTPD). Override with `XAI_SIREN_HANDLES` (comma-separated, max 20, no `@`).
+- The search window is 00:00 UTC yesterday through 00:00 UTC tomorrow, so a stale warning is not treated as current. `max_turns` is 2. xAI bills fetched posts separately from tokens.
+- The body is the label plus a place string (default: Fulton County, near the Georgia Tech campus in Atlanta; override with `XAI_SIREN_PLACE`). It contains no audio. The key lives in gitignored `Local.xcconfig`.
+- Grok must answer with one short action line, or exactly `NONE`. Empty, hedged, uncertain, or overlong answers are dropped and the plain banner stays. A wrong explanation is worse than none.
+- A confident answer replaces the banner in place, for example: "🚨 Siren: tornado warning for Fulton County, shelter now." The lookup is cancelled when the banner clears or a newer alert arrives.
+- This does not change `sound_event`. The explanation is presentation only and is not stored on the phone. xAI may retain the text prompt under its own API policy.
+
+**Speaking replies**
+- The speaker button opens a sheet: type a reply, pick the language you type in (default English) and the language the other person hears (default Spanish (Mexico)), then pick a voice. Captions stay on screen and are not delayed.
+- With `XAI_API_KEY` set, the phone calls `POST https://api.x.ai/v1/responses` (`grok-4.7`, no tools) to translate, then `POST https://api.x.ai/v1/tts` to speak that exact text. The TTS `language` is the listener's code. Any built-in voice can speak every supported language. The request is text only: no microphone audio is uploaded. Graption does not store the typed text or the audio. xAI may retain the text under its own API policy.
+- The same primary language is not translated (`en` to `en`, or `es-MX` to `es-ES`). The text is still spoken in the selected listener language.
+- `XAI_SPEECH_ENGINE=voice` speaks the translation with Grok Voice 3.0 (`wss://api.x.ai/v1/realtime?model=grok-voice-3.0`) instead of TTS. The session is told to read the translation verbatim and not answer it. TTS is the default because it speaks the translation exactly. Voice 3.0 can still paraphrase.
+- Custom Voices use an xAI `voice_id` in place of `eve`, `ara`, `leo`, `rex`, or `sal`. Create the voice in the xAI console (or the Enterprise custom-voice API) and paste the ID. The app sends the ID, not a reference recording.
+- With no key, the iPhone speaks the typed words with `AVSpeechSynthesizer` and the sheet says they were not translated. If Grok audio cannot be played, the iPhone speaks the translated text instead. A network or API failure shows an error and does not speak a guessed translation.
+- Replies are capped at 500 characters. Unsupported language codes and invalid voice IDs are rejected before any request. Listening pauses while the reply is requested and played, then resumes without a new calibration.
+
 **ToneClient**
 - Sends a `tone_request` per segment and receives `tone_result`.
 - If disconnected, drop tone silently and retry the connection every 5s. This must never affect captions.
@@ -333,7 +353,8 @@ for caption [t0, t1]:
   segments shorter than 1 second (including retained silence) are logged to the
   debugger but hidden on screen; short recognized speech remains visible. This is
   display filtering, not spike rejection or reliable no-speech detection.
-- Tone tag chip; sound alert banners (visual plus haptic).
+- Tone tag chip; sound alert banners (visual plus haptic). A siren or alarm banner starts as the plain label and can update to the official explanation, announced again for VoiceOver.
+- Speaker button opens **Speak a reply**. The same sheet is available on the model-install screen, so a translated reply does not wait on WhisperKit.
 - Large and dynamic type, high contrast. Follow Apple's Accessibility HIG.
 
 **Past-meetings dashboard** (Platform)
@@ -403,7 +424,7 @@ for caption [t0, t1]:
   - Allow a WebSocket request timeout of at least 60 min.
   - Bake the WavLM and head weights into the image so cold starts don't download them.
 - **Endpoint:** `/ws/session`. One connection per app session, handling `tone_request` and `caption_log`.
-- **Optional STT endpoint:** `/ws/stt?session_id=`. Same bearer token as tone when a token exists. After connect the server sends `stt.ready`, then accepts optional `stt.start` (`sample_rate` 16000, `keyterms`) and binary PCM16 little-endian mono 16 kHz frames, then `audio.done`. It proxies that audio to `wss://api.x.ai/v1/stt` model `grok-voice-transcribe-2.0` with interim results and diarization. Replies are `stt.partial`, `stt.done`, and `stt.error`. `XAI_API_KEY` is server-only and never shipped in the app. Audio is not stored or logged.
+- **Optional STT endpoint:** `/ws/stt?session_id=`. Same bearer token as tone when a token exists. After connect the server sends `stt.ready`, then accepts optional `stt.start` (`sample_rate` 16000, `keyterms`) and binary PCM16 little-endian mono 16 kHz frames, then `audio.done`. It proxies that audio to `wss://api.x.ai/v1/stt` model `grok-voice-transcribe-2.0` with interim results and diarization. Replies are `stt.partial`, `stt.done`, and `stt.error`. The proxy's `XAI_API_KEY` stays on the server. Audio is not stored or logged.
 - **Auth:** if `TONE_TOKEN` is set, require a matching bearer token. Always set it outside `local` mode.
 - **Pipeline** (device auto-select: `cuda` → `mps` → `cpu`; the code must run correctly on all three):
   1. Decode PCM16 and resample to 16 kHz if needed.
@@ -418,7 +439,7 @@ for caption [t0, t1]:
   - otherwise `null`; segments under 0.5 s are always `null`
   - `probs` are all zero in this mode: the schema's 6 emotions don't apply to arousal/valence.
   - Weights load from the local Hugging Face cache (`uv run hf download audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`); torch, transformers, and scipy come from the uv workspace (`graption-ml`), not `graption-server`'s own dependencies.
-- **Config (env vars):** `TONE_BACKEND` (`mock` default | `audeering` | `custom` later), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `XAI_API_KEY` (server-only, for `/ws/stt`; never shipped in the app), `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
+- **Config (env vars):** `TONE_BACKEND` (`mock` default | `audeering` | `custom` later), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `XAI_API_KEY` (server copy for `/ws/stt`; the phone has its own gitignored copy for siren context and spoken replies), `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
 - **CPU performance:** the audEERING baseline is the large wav2vec2 variant (~165M params) and may be slow on CPU. Benchmark per-sentence latency on Cloud Run before user testing. If it's over ~1s, use the custom WavLM-base head in cloud mode.
 - **SQLite tables:** `sessions`, `captions` (from `caption_log`), `tone_results` (probs, model_version, latency).
   - Cloud Run disks are ephemeral, so in cloud mode, export the SQLite file to `LOG_EXPORT_BUCKET` at session end.
@@ -550,7 +571,7 @@ If the device is overloaded, degrade in this order:
 - **Every event and log** carries model versions.
 - **Every training run** goes to W&B, with the config committed alongside it.
 - **Branching:** PRs to `main`, and CI must pass. Add `CODEOWNERS` per team folder once reviews are enforced.
-- **Secrets** (`TONE_TOKEN`, `XAI_API_KEY`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo. `XAI_API_KEY` is server-only.
+- **Secrets** (`TONE_TOKEN`, `XAI_API_KEY`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo. The `/ws/stt` proxy keeps its `XAI_API_KEY` on the server. Siren context and spoken replies read a separate `XAI_API_KEY` from the phone's gitignored `Local.xcconfig`.
 - **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. OpenAI keys get a hard monthly spend limit.
 - **Licenses:** the audEERING model and MSP-Podcast are non-commercial. That's fine for this academic MVP, but flag it before any commercial use.
 
@@ -610,7 +631,8 @@ If the device is overloaded, degrade in this order:
   GraptionCore uses Swift tools 6.0 so it builds with the installed Xcode 26 toolchain.
 - **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
-- **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an API key must never ship in the app.
+- **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an OpenAI API key must never ship in the app.
+- **Spoken replies reuse the siren xAI key.** The phone translates with Grok and speaks with Grok TTS, or with Grok Voice 3.0 when `XAI_SPEECH_ENGINE=voice`. No key: the iPhone speaks the typed words and does not translate. Captions never wait. The reply text and the audio are not stored. A custom voice is an xAI voice ID, not a clip uploaded by Graption.
 
 ---
 

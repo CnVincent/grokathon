@@ -9,7 +9,11 @@ Mac + Xcode required; GraptionCore requires Swift 6.0+.
 2. `cp apps/ios/Config/Local.xcconfig.example apps/ios/Config/Local.xcconfig` and fill in
    `DEVELOPMENT_TEAM` (your 10-character team ID) and `DEV_SUFFIX` (your name). Add `TONE_URL`
    (for example, `ws:/$()/<mac-lan-ip>:8000`; the unusual spelling avoids xcconfig treating `//` as a comment)
-   and `TONE_TOKEN` only when testing the tone server. This file is
+   and `TONE_TOKEN` only when testing the tone server. Set `XAI_API_KEY` only if siren
+   and alarm banners should ask Grok why the sound is happening, or if typed replies
+   should be translated and spoken by Grok. Leave it empty and those banners stay
+   on-device; typed replies are spoken on-device and are not translated. Optional
+   `XAI_SPEECH_ENGINE` is `tts` (default) or `voice` (Grok Voice 3.0). This file is
    gitignored. It exists because two free Apple IDs can't share one bundle ID.
 3. Open `apps/ios/Graption.xcodeproj`. Pick a simulator and press ⌘R.
 4. On your iPhone: plug in → **Trust** → Settings → Privacy & Security → **Developer Mode** on →
@@ -32,13 +36,13 @@ apps/ios/
 ├── Graption/              # thin app target: entry point + wiring only                  (Platform)
 ├── Config/
 │   ├── Base.xcconfig      # shared settings: bundle ID = edu.gatech.graption.$(DEV_SUFFIX)
-│   └── Local.xcconfig     # gitignored, per developer: DEVELOPMENT_TEAM, DEV_SUFFIX (+ TONE_URL/TONE_TOKEN later)
+│   └── Local.xcconfig     # gitignored: DEVELOPMENT_TEAM, DEV_SUFFIX, TONE_URL, TONE_TOKEN, XAI_API_KEY
 └── Packages/              # planned local Swift packages; almost all code will live here
     ├── GraptionCore/      # event types generated from the schema, Mock* classes        (Platform)
     ├── GraptionVision/    # camera, MediaPipe, FaceTracker, FeatureBuilder, SpeakerModel (Vision)
     ├── GraptionAudio/     # mic, loudness, VAD, WhisperKit, SoundAnalysis               (Audio)
     ├── GraptionFusion/    # ScoreBuffer, Fusion (pick speaker for each caption)         (Platform)
-    ├── GraptionNetwork/   # ToneClient WebSocket                                        (Platform)
+    ├── GraptionNetwork/   # ToneClient, GrokSTTClient, siren context, spoken replies (Platform)
     └── GraptionUI/        # live captions, highlights, tone chips, sound banners,
                            # past-meetings dashboard with AI summaries      (UI/UX; dashboard: Platform)
 ```
