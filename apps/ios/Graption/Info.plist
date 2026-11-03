@@ -18,10 +18,18 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>GraptionSirenHandles</key>
+	<string>$(XAI_SIREN_HANDLES)</string>
+	<key>GraptionSpeechEngine</key>
+	<string>$(XAI_SPEECH_ENGINE)</string>
+	<key>GraptionSirenPlace</key>
+	<string>$(XAI_SIREN_PLACE)</string>
 	<key>GraptionToneToken</key>
 	<string>$(TONE_TOKEN)</string>
 	<key>GraptionToneURL</key>
 	<string>$(TONE_URL)</string>
+	<key>GraptionXAIKey</key>
+	<string>$(XAI_API_KEY)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

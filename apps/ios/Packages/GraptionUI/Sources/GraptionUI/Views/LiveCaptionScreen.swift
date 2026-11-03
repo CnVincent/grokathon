@@ -25,6 +25,8 @@ public struct LiveCaptionScreen: View {
     private let calibrationCount: Int?
     private let isSettingUp: Bool
     private let onWhatDidIMiss: (([LiveCaption]) async throws -> String)?
+    private let canSpeak: Bool
+    private let onSpeak: () -> Void
 
     public init(
         cameraPreviewDestination: (() -> AnyView)? = nil,
@@ -40,7 +42,9 @@ public struct LiveCaptionScreen: View {
         isCalibrating: Bool = false,
         calibrationCount: Int? = nil,
         isSettingUp: Bool = false,
-        onWhatDidIMiss: (([LiveCaption]) async throws -> String)? = nil
+        onWhatDidIMiss: (([LiveCaption]) async throws -> String)? = nil,
+        canSpeak: Bool = true,
+        onSpeak: @escaping () -> Void = {}
     ) {
         self.cameraPreviewDestination = cameraPreviewDestination
         self.suppliedCaptions = captions
@@ -56,6 +60,8 @@ public struct LiveCaptionScreen: View {
         self.calibrationCount = calibrationCount
         self.isSettingUp = isSettingUp
         self.onWhatDidIMiss = onWhatDidIMiss
+        self.canSpeak = canSpeak
+        self.onSpeak = onSpeak
     }
 
     private var usesLiveAudio: Bool { onMicrophone != nil }
@@ -103,7 +109,9 @@ public struct LiveCaptionScreen: View {
             BottomControlsBar(
                 isListening: isListening,
                 canListen: canListen,
-                onMicrophone: { onMicrophone?() }
+                canSpeak: canSpeak,
+                onMicrophone: { onMicrophone?() },
+                onSpeak: onSpeak
             )
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from app.observability import close_logging, configure_logging, record
+from app.stt_ws import router as stt_router
 from app.summary import create_summary_backend
 from app.summary import router as summary_router
 from app.tone import create_backend
@@ -37,6 +38,7 @@ def create_app(*, verbose: bool = False) -> FastAPI:
     # SUMMARY_BACKEND picks mock (default) or grok; unavailable backends stay None.
     app.state.summary_backend = create_summary_backend()
     app.include_router(router)
+    app.include_router(stt_router)
     app.include_router(summary_router)
     app.add_api_route("/health", health, response_class=PlainTextResponse)
     return app

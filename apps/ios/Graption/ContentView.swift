@@ -12,7 +12,9 @@ struct ContentView: View {
             sessionID: ContentView.sessionID
         )
     )
-    @State private var soundAlertModel = SoundAlertModel()
+    @State private var soundAlertModel = SoundAlertModel(
+        contextClient: GrokSirenContextClient.fromAppConfiguration()
+    )
     @State private var hasPrintedLabels = false
     @State private var isVisible = false
     @State private var pipeline = CaptionPipeline()
@@ -27,6 +29,14 @@ struct ContentView: View {
     @State private var setupFailed = false
     @State private var captions: [CaptionEntry] = []
     @State private var listenTask: Task<Void, Never>?
+    @AppStorage("onlineCaptionsEnabled") private var onlineCaptionsEnabled = false
+    @AppStorage("onlineCaptionConsent") private var onlineCaptionConsent = false
+    @State private var grokClient: GrokSTTClient?
+    @State private var grokEventTask: Task<Void, Never>?
+    @State private var onlineBoostActive = false
+    @State private var onlineCaptionID: UUID?
+    @State private var grokModelVersion = ""
+    @State private var showSpeakSheet = false
 
     private var canListen: Bool {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
@@ -37,13 +47,19 @@ struct ContentView: View {
     /// Newest three captions, oldest on the left, matching the three-bubble layout.
     private var bubbleCaptions: [LiveCaption] {
         captions.prefix(3).reversed().map { entry in
-            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text, spokenAt: entry.spokenAt)
+            LiveCaption(
+                id: entry.id,
+                speakerName: entry.speakerName,
+                text: entry.text,
+                spokenAt: entry.spokenAt
+            )
         }
     }
 
     private var bannerAlert: GraptionUI.SoundAlert? {
         guard let alert = soundAlertModel.currentAlert else { return nil }
-        return GraptionUI.SoundAlert(message: SoundAlertBanner.title(for: alert.label))
+        let message = soundAlertModel.contextLine ?? SoundAlertBanner.title(for: alert.label)
+        return GraptionUI.SoundAlert(message: message)
     }
 
     var body: some View {
@@ -67,12 +83,22 @@ struct ContentView: View {
                     isSettingUp: isPreparing,
                     onWhatDidIMiss: { _ in
                         try await summarizeMissedCaptions()
-                    }
+                    },
+                    canSpeak: !isCalibrating && !isPreparing && !isStarting,
+                    onSpeak: { showSpeakSheet = true }
                 )
             } else {
-                InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
-                    Task { await prepareModel(allowDownload: true) }
-                }
+                InstallBaseEnPage(
+                    isInstalling: isPreparing,
+                    detail: setupFailed ? status : nil,
+                    install: { Task { await prepareModel(allowDownload: true) } },
+                    onSpeak: { showSpeakSheet = true }
+                )
+            }
+        }
+        .sheet(isPresented: $showSpeakSheet) {
+            SpeakReplySheet { draft in
+                try await speakReply(draft)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -88,6 +114,7 @@ struct ContentView: View {
             SavedSessionsView()
         }
         .animation(.default, value: soundAlertModel.currentAlert?.id)
+        .animation(.default, value: soundAlertModel.contextLine)
         .sensoryFeedback(.warning, trigger: soundAlertModel.currentAlert?.id) { _, new in
             new != nil
         }
@@ -109,12 +136,22 @@ struct ContentView: View {
                 report(error)
             }
         }
+        .onChange(of: onlineCaptionsEnabled) { _, enabled in
+            guard isRecording else { return }
+            if enabled, onlineCaptionConsent {
+                Task { await startOnlineBoost() }
+            } else {
+                fallbackFromOnlineBoost()
+            }
+        }
         .onDisappear {
             isVisible = false
             toneMonitor.stop()
             listenTask?.cancel()
+            stopOnlineBoost()
             capture?.onSegment = nil
             capture?.onSoundAlert = nil
+            capture?.onSamples = nil
             capture?.stop()
             soundAlertModel.clear()
             pipeline.reset()
@@ -168,6 +205,9 @@ struct ContentView: View {
             let isBlankAudio = caption.text.contains("[BLANK_AUDIO]") && displayText.isEmpty
             let isShortEmpty = caption.tEnd - caption.tStart < 1 && displayText.isEmpty
             guard !isBlankAudio, !isShortEmpty else { return }
+            // Online Grok STT owns the visible list while the boost is healthy.
+            // WhisperKit keeps running so fallback captions can appear immediately.
+            guard !onlineBoostActive else { return }
             // Stable caption IDs keep cards distinct when newer results arrive.
             captions.insert(CaptionEntry(
                 result: caption,
@@ -247,9 +287,61 @@ struct ContentView: View {
             try capture.start()
             isRecording = true
             status = "Listening"
+            Task { await startOnlineBoost() }
         } catch {
             report(error)
         }
+    }
+
+    /// Speaks a typed reply. Listening pauses so the phone does not caption its own speaker.
+    private func speakReply(_ draft: SpeakReplyDraft) async throws -> SpokenReply {
+        let resume = isRecording
+        if resume {
+            capture?.stop()
+            isRecording = false
+        }
+        defer {
+            guard resume else { return }
+            do {
+                try capture?.start()
+                isRecording = true
+                status = onlineBoostActive ? "Listening · online" : "Listening"
+            } catch {
+                report(error)
+            }
+        }
+
+        let player = ReplyAudioPlayer()
+        if let client = GrokSpeakingReplyClient.fromAppConfiguration() {
+            let audio = try await client.speak(
+                text: draft.text,
+                sourceLanguage: draft.sourceLanguage,
+                targetLanguage: draft.targetLanguage,
+                voiceID: draft.voiceID
+            )
+            let language = audio.translated ? audio.targetLanguage : audio.sourceLanguage
+            var usedServerAudio = false
+            do {
+                try await player.play(data: audio.audio)
+                usedServerAudio = true
+            } catch {
+                try await player.speak(text: audio.spokenText, language: language)
+            }
+            return SpokenReply(
+                spokenText: audio.spokenText,
+                translated: audio.translated,
+                modelVersion: audio.modelVersion,
+                usedServerAudio: usedServerAudio
+            )
+        }
+
+        try await player.speak(text: draft.text, language: draft.sourceLanguage)
+        return SpokenReply(
+            spokenText: draft.text,
+            translated: false,
+            modelVersion: "ios-speech",
+            usedServerAudio: false
+        )
     }
 
     private func stopListening() {
@@ -259,9 +351,147 @@ struct ContentView: View {
         isRecording = false
         listenTask?.cancel()
         listenTask = nil
+        stopOnlineBoost()
         capture?.stop()
         soundAlertModel.clear()
         status = wasCalibrating ? "Ready" : "Stopped; finishing pending captions"
+    }
+
+    private func startOnlineBoost() async {
+        guard onlineCaptionsEnabled, onlineCaptionConsent else { return }
+        guard let capture else { return }
+        guard let toneConfig = ToneClientConfiguration.fromAppConfiguration(
+            sessionID: UUID().uuidString
+        ) else { return }
+        if grokClient != nil {
+            stopOnlineBoost()
+        }
+
+        let client = GrokSTTClient(configuration: GrokSTTConfiguration(toneConfig))
+        grokClient = client
+        grokEventTask = Task { @MainActor in
+            for await event in client.events {
+                handleGrokEvent(event)
+            }
+        }
+        do {
+            try await client.connect()
+            capture.onSamples = { samples in
+                let pcm = pcm16Data(from: samples)
+                Task { await client.sendPCM(pcm) }
+            }
+        } catch {
+            capture.onSamples = nil
+            onlineBoostActive = false
+            grokEventTask?.cancel()
+            grokEventTask = nil
+            grokClient = nil
+            await client.disconnect()
+            print("Online captions unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopOnlineBoost() {
+        capture?.onSamples = nil
+        onlineBoostActive = false
+        onlineCaptionID = nil
+        grokEventTask?.cancel()
+        grokEventTask = nil
+        let client = grokClient
+        grokClient = nil
+        guard let client else { return }
+        Task {
+            await client.finish()
+            await client.disconnect()
+        }
+    }
+
+    private func fallbackFromOnlineBoost() {
+        guard onlineBoostActive || grokClient != nil || capture?.onSamples != nil else { return }
+        capture?.onSamples = nil
+        onlineBoostActive = false
+        onlineCaptionID = nil
+        grokEventTask?.cancel()
+        grokEventTask = nil
+        let client = grokClient
+        grokClient = nil
+        if let client {
+            Task { await client.disconnect() }
+        }
+        if isRecording {
+            status = "Listening"
+        }
+    }
+
+    private func handleGrokEvent(_ event: GrokSTTEvent) {
+        switch event {
+        case .ready(let modelVersion):
+            grokModelVersion = modelVersion
+            onlineBoostActive = true
+            if isRecording {
+                status = "Listening · online"
+            }
+            print("Online captions ready [\(modelVersion)]")
+        case .partial(let text, let language, let isFinal, let speechFinal, let speaker):
+            presentOnlineCaption(
+                text: text,
+                language: language,
+                speaker: speaker,
+                endsUtterance: isFinal || speechFinal
+            )
+        case .done(let text, let language, _, let speaker):
+            presentOnlineCaption(
+                text: text,
+                language: language,
+                speaker: speaker,
+                endsUtterance: true
+            )
+        case .error(_, let message):
+            print("Online captions error: \(message)")
+            fallbackFromOnlineBoost()
+        case .disconnected:
+            fallbackFromOnlineBoost()
+        }
+    }
+
+    private func presentOnlineCaption(
+        text: String,
+        language: String?,
+        speaker: Int?,
+        endsUtterance: Bool
+    ) {
+        let display = formattedOnlineCaption(text: text, language: language)
+        guard !display.isEmpty else { return }
+        if onlineCaptionID == nil, endsUtterance, captions.first?.text == display {
+            return
+        }
+        let speakerName = speaker.map { "Speaker \($0)" } ?? "Someone"
+        if let id = onlineCaptionID, let index = captions.firstIndex(where: { $0.id == id }) {
+            captions[index] = CaptionEntry(
+                id: id,
+                text: display,
+                speakerName: speakerName
+            )
+        } else {
+            let id = UUID()
+            onlineCaptionID = id
+            captions.insert(
+                CaptionEntry(id: id, text: display, speakerName: speakerName),
+                at: 0
+            )
+            print("Caption \(id) [\(grokModelVersion)] \(display)")
+        }
+        if endsUtterance {
+            onlineCaptionID = nil
+        }
+    }
+
+    private func formattedOnlineCaption(text: String, language: String?) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let language, !language.isEmpty {
+            return "[\(language)] \(trimmed)"
+        }
+        return trimmed
     }
 
     private func printKnownLabelsOnce() {
@@ -286,7 +516,7 @@ struct ContentView: View {
         let lines = captions.compactMap { entry -> MissedCaptionLine? in
             guard entry.spokenAt >= cutoff else { return nil }
             return MissedCaptionLine(
-                speaker: "Someone",
+                speaker: entry.speakerName,
                 text: entry.text,
                 tone: nil,
                 tEnd: entry.spokenAt.timeIntervalSince1970
@@ -302,6 +532,7 @@ private struct InstallBaseEnPage: View {
     var isInstalling: Bool
     var detail: String?
     var install: () -> Void
+    var onSpeak: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -326,6 +557,11 @@ private struct InstallBaseEnPage: View {
                 .disabled(isInstalling)
                 .buttonStyle(.borderedProminent)
                 .tint(Color(red: 1, green: 149 / 255, blue: 0))
+                Button("Speak a reply") {
+                    onSpeak()
+                }
+                .buttonStyle(.bordered)
+                .tint(Color(red: 1, green: 149 / 255, blue: 0))
             }
             .padding(32)
         }
@@ -334,9 +570,45 @@ private struct InstallBaseEnPage: View {
 
 /// Presentation data only; the transcription/event contracts are unchanged.
 private struct CaptionEntry: Identifiable {
-    let result: TranscriptionResult
+    let id: UUID
+    let result: TranscriptionResult?
     let text: String
+    let speakerName: String
     let transcriptionSeconds: TimeInterval
-    var spokenAt: Date = Date()
-    var id: UUID { result.captionID }
+    var spokenAt: Date
+
+    init(
+        result: TranscriptionResult,
+        text: String,
+        transcriptionSeconds: TimeInterval,
+        spokenAt: Date = Date()
+    ) {
+        self.id = result.captionID
+        self.result = result
+        self.text = text
+        self.speakerName = "Someone"
+        self.transcriptionSeconds = transcriptionSeconds
+        self.spokenAt = spokenAt
+    }
+
+    init(id: UUID, text: String, speakerName: String, spokenAt: Date = Date()) {
+        self.id = id
+        self.result = nil
+        self.text = text
+        self.speakerName = speakerName
+        self.transcriptionSeconds = 0
+        self.spokenAt = spokenAt
+    }
+}
+
+private func pcm16Data(from samples: [Float]) -> Data {
+    var data = Data(count: samples.count * MemoryLayout<Int16>.size)
+    data.withUnsafeMutableBytes { rawBuffer in
+        let destination = rawBuffer.bindMemory(to: Int16.self)
+        for index in samples.indices {
+            let clamped = min(max(samples[index], -1), 1)
+            destination[index] = clamped.isFinite ? Int16(clamped * Float(Int16.max)) : 0
+        }
+    }
+    return data
 }
