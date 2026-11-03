@@ -97,7 +97,9 @@ after the first request (~0.5 s warm-up). Check it with the P3 replay client
 to disk or logs. Torch, transformers, and scipy come from the uv workspace (`graption-ml`);
 they are not dependencies of this package, and MediaPipe stays out entirely.
 
-Export `TONE_TOKEN` to require `Authorization: Bearer <token>` on the handshake.
+`POST /summary` recaps the last 120 seconds of caption text (no audio). `SUMMARY_BACKEND=mock` (default) needs no key. `SUMMARY_BACKEND=grok` calls xAI with `XAI_API_KEY` and returns 503 `summary_unavailable` when the key is missing. The same `TONE_TOKEN` / `DEPLOY_MODE` rules as the websocket apply. Caption text and the summary body are not logged.
+
+Export `TONE_TOKEN` to require `Authorization: Bearer <token>` on the handshake and on `POST /summary`.
 Export `DEPLOY_MODE=tunnel` or `cloud` to require a configured token as well.
 These environment variables are read from the process; to load a local `.env` file,
 pass uvicorn's `--env-file <path>` option. Hosting and real inference are later work.
