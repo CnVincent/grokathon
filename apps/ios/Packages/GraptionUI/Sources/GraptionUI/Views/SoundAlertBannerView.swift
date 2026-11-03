@@ -13,15 +13,14 @@ struct SoundAlertBannerView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sound alert")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(Color.graptionAccent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text(alert.message)
-                    .font(.footnote)
+                    .font(.caption.bold())
                     .foregroundStyle(Color.graptionSecondaryText)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.4)
+                Text(alert.message)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(Color.graptionAccent)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.7)
             }
 
             Spacer(minLength: 8)
@@ -41,10 +40,20 @@ struct SoundAlertBannerView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.graptionAccent).frame(height: 1)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel(alert.message)
     }
 }
 
 #Preview {
-    SoundAlertBannerView(alert: SoundAlert(message: "Loud noise detected. Haptics enabled."))
+    SoundAlertBannerView(alert: SoundAlert(message: "Siren"))
         .background(Color.graptionBackground)
+}
+
+#Preview("Siren context") {
+    SoundAlertBannerView(
+        alert: SoundAlert(message: "🚨 Siren: tornado warning for Fulton County, shelter now.")
+    )
+    .background(Color.graptionBackground)
 }

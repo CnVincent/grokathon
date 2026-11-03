@@ -3,7 +3,9 @@ import SwiftUI
 struct BottomControlsBar: View {
     var isListening = false
     var canListen = true
+    var canSpeak = true
     var onMicrophone: () -> Void = {}
+    var onSpeak: () -> Void = {}
 
     /// Same orange as the rule above the bar and the "Live captions" title.
     private let buttonOrange = Color.graptionAccent
@@ -41,7 +43,7 @@ struct BottomControlsBar: View {
             }
             .accessibilityLabel("Transcript")
 
-            Button {} label: {
+            Button(action: onSpeak) {
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.system(size: 20))
                     .foregroundStyle(buttonOrange)
@@ -49,7 +51,9 @@ struct BottomControlsBar: View {
                     .background(Color.white.opacity(0.08), in: Circle())
                     .overlay(Circle().stroke(buttonOrange, lineWidth: 1))
             }
-            .accessibilityLabel("Volume")
+            .disabled(!canSpeak)
+            .accessibilityLabel("Speak a reply")
+            .accessibilityHint("Type a reply and hear it in another language")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

@@ -12,3 +12,13 @@ DEV_SUFFIX = yourname
 // Example local URL: ws:/$()/192.168.1.8:8000
 TONE_URL =
 TONE_TOKEN =
+
+// Optional xAI key. Siren and alarm banners still show with this empty.
+// Spoken replies still speak on-device with this empty, and they are not translated.
+// Siren context sends the sound label and a place string, never audio.
+// Spoken replies send the typed text, never microphone audio.
+XAI_API_KEY =
+// XAI_SPEECH_ENGINE = tts
+// XAI_SPEECH_ENGINE = voice
+// XAI_SIREN_PLACE = Fulton County, near the Georgia Tech campus in Atlanta
+// XAI_SIREN_HANDLES = NWS,NWSAtlanta,NWSSPC,GaTechPD,GTPDalerts,Atlanta_Police
