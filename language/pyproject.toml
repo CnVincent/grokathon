@@ -1,7 +1,7 @@
 [project]
 name = "graption-language"
 version = "0.1.0"
-description = "Graption summaries/notes: prototypes and OpenAI/Ollama benchmarks (platform team)."
+description = "Graption summaries/notes: prototypes and Grok (xAI)/Ollama benchmarks (platform team)."
 requires-python = ">=3.11"
 dependencies = []
 

@@ -104,7 +104,7 @@ Long-term, the tone model moves on-device (Core ML). The STT proxy remains optio
 | Data storage | Team shared Google Drive folder (datasets, team recordings) |
 | Labeling | Label Studio (own recordings) |
 | Schema | JSON Schema → Pydantic (`datamodel-code-generator`) + Swift (`quicktype`) |
-| LLM (summaries, Platform team) | Target: Apple Foundation Models (on-device, free). Benchmark: OpenAI API (small models). Prototyping: Ollama |
+| LLM (summaries, Platform team) | Target: Apple Foundation Models (on-device, free). Benchmark: Grok via the xAI API (`language/`). Live "What did I miss?" is an optional server summary of the last two minutes of caption text |
 | CI | GitHub Actions: ruff, pytest, SwiftLint |
 
 ---
@@ -131,7 +131,7 @@ graption/
 │   ├── common/features.py    # CANONICAL feature spec (Swift mirrors it)
 │   ├── asd/                  # speaker model: extract, dataset, train, eval, export
 │   └── tone/                 # embed, train_head, eval, baseline
-├── language/                 # summary/notes prototypes + OpenAI benchmark scripts (Platform)
+├── language/                 # summary benchmark scripts; Grok (xAI), not OpenAI (Platform)
 ├── schemas/events.schema.json
 └── docs/                     # this file, diagrams, latency results
 ```
@@ -518,13 +518,13 @@ for caption [t0, t1]:
 
 ## 10. AI summaries and notes (Platform team, non-blocking)
 
-**Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6).
-- **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices). Free and offline. Use `@Generable` for structured output.
-- **Benchmark:** OpenAI API (a small, cheap model) run from Python scripts in `language/`, on exported caption logs. It sets the quality bar that the on-device version is measured against.
-  - **Never** call OpenAI from the iOS app; the API key would ship inside the app.
-  - Keep the key in a local `.env`, never committed.
+**Feature:** a post-session "catch me up" summary/notes built from the caption log (speaker + text + tone), shown in the past-meetings dashboard (section 6). Also a live **What did I miss?** button that summarizes the last two minutes of caption text.
+- **Target:** Apple Foundation Models on-device (iOS 26+, Apple Intelligence devices) for the dashboard. Free and offline. Use `@Generable` for structured output.
+- **Benchmark:** Grok (`grok-3-mini` by default) via `POST https://api.x.ai/v1/chat/completions`, run from `language/summarize.py` on exported caption logs. It sets the quality bar for the on-device version.
+  - **Never** call xAI or OpenAI from the iOS app. `XAI_API_KEY` stays in `.env` or on the server.
   - Keep a small eval set of about 20 transcripts plus reference summaries, and score both systems on it.
-- **Prototyping:** Ollama on the Mac.
+- **Live button:** optional. The phone sends caption text (speaker, text, tone, `t_end`) from the last 120 seconds to `POST /summary` on the tone server. `SUMMARY_BACKEND=mock` (default) needs no key and returns a deterministic recap. `SUMMARY_BACKEND=grok` forwards that text to xAI and returns 503 `summary_unavailable` when `XAI_API_KEY` is missing. The user must accept a consent sheet first. Declining, a missing server, or a failed request leaves captions, speaker highlighting, and sound alerts running. No audio is sent or stored for this feature.
+- **Prototyping:** Ollama on the Mac, or the mock backend.
 - **Context limit** is about 4K tokens on-device, so chunk long transcripts and summarize hierarchically.
 - Not on the critical path for the MVP.
 
@@ -571,8 +571,8 @@ If the device is overloaded, degrade in this order:
 - **Every event and log** carries model versions.
 - **Every training run** goes to W&B, with the config committed alongside it.
 - **Branching:** PRs to `main`, and CI must pass. Add `CODEOWNERS` per team folder once reviews are enforced.
-- **Secrets** (`TONE_TOKEN`, `XAI_API_KEY`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo. The `/ws/stt` proxy keeps its `XAI_API_KEY` on the server. Siren context and spoken replies read a separate `XAI_API_KEY` from the phone's gitignored `Local.xcconfig`.
-- **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. OpenAI keys get a hard monthly spend limit.
+- **Secrets** (`TONE_TOKEN`, `XAI_API_KEY`, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo. The `/ws/stt` proxy and `POST /summary` keep `XAI_API_KEY` on the server. Siren context and spoken replies read a separate `XAI_API_KEY` from the phone's gitignored `Local.xcconfig`. The summary button never sees a key.
+- **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. The xAI key gets a hard monthly spend limit. The summary benchmark and the live button both work without it (`--mock` / `SUMMARY_BACKEND=mock`).
 - **Licenses:** the audEERING model and MSP-Podcast are non-commercial. That's fine for this academic MVP, but flag it before any commercial use.
 
 ---
@@ -604,7 +604,7 @@ If the device is overloaded, degrade in this order:
 | Item | Cost | Unlocks | If denied |
 |---|---|---|---|
 | Apple Developer Program | $99 | TestFlight for at-home DHH testing | Ask iOS Club for a team account; otherwise test in person on team phones |
-| OpenAI API credits | $50 | Summary-quality benchmark | Compare against Ollama models only |
+| xAI API key (optional) | sponsor credits | Grok summary benchmark and live "What did I miss?" | `SUMMARY_BACKEND=mock` and `language/summarize.py --mock` |
 | Cloud credits | $100 | Always-on tone server for remote testers | Cloudflare Tunnel from the Mac, or free student credits (Azure for Students, GitHub Student Pack) |
 
 **Deliberately not requested:**
@@ -631,7 +631,7 @@ If the device is overloaded, degrade in this order:
   GraptionCore uses Swift tools 6.0 so it builds with the installed Xcode 26 toolchain.
 - **Committed `.xcodeproj`, not XcodeGen:** synchronized folders plus per-team Swift packages already avoid most merge conflicts, and it saves every teammate a tool install. Signing is per developer via a gitignored `Local.xcconfig`, because free Apple IDs can't share a bundle ID.
 - **Platform owns summaries and the dashboard:** there's no separate language team; it's non-blocking backend-style work that builds on the caption log Platform already moves around.
-- **OpenAI only as an offline benchmark:** the target is free on-device Apple Foundation Models, and an OpenAI API key must never ship in the app.
+- **Grok summaries are optional and proxied:** the quality benchmark moved from OpenAI to Grok because xAI is the sponsor. The live "What did I miss?" button sends the last two minutes of caption text through the server. The xAI key never ships in the app for that button. On-device Apple Foundation Models stay the offline target for the past-meetings dashboard. Captions do not wait on a summary.
 - **Spoken replies reuse the siren xAI key.** The phone translates with Grok and speaks with Grok TTS, or with Grok Voice 3.0 when `XAI_SPEECH_ENGINE=voice`. No key: the iPhone speaks the typed words and does not translate. Captions never wait. The reply text and the audio are not stored. A custom voice is an xAI voice ID, not a clip uploaded by Graption.
 
 ---

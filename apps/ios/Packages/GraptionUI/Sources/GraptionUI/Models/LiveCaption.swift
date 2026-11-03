@@ -9,11 +9,19 @@ public struct LiveCaption: Identifiable, Equatable {
     public var speakerName: String
     public var toneTag: String?
     public var text: String
+    public var spokenAt: Date
 
-    public init(id: UUID = UUID(), speakerName: String, toneTag: String? = nil, text: String) {
+    public init(
+        id: UUID = UUID(),
+        speakerName: String,
+        toneTag: String? = nil,
+        text: String,
+        spokenAt: Date = Date()
+    ) {
         self.id = id
         self.speakerName = speakerName
         self.toneTag = toneTag
         self.text = text
+        self.spokenAt = spokenAt
     }
 }

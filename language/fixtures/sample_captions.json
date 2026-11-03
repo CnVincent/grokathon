@@ -1,0 +1,19 @@
+[
+  {
+    "speaker": "Alex",
+    "text": "We should start with the agenda.",
+    "tone": "calm",
+    "t_end": 12.5
+  },
+  {
+    "speaker": "Jordan",
+    "text": "Sounds good. I have the budget numbers.",
+    "t_end": 18.0
+  },
+  {
+    "speaker": "Alex",
+    "text": "Great, let's go through them one by one.",
+    "tone": "excited",
+    "t_end": 24.0
+  }
+]

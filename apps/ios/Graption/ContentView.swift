@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
-            sessionID: UUID().uuidString
+            sessionID: ContentView.sessionID
         )
     )
     @State private var soundAlertModel = SoundAlertModel(
@@ -42,10 +42,17 @@ struct ContentView: View {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
     }
 
+    private static let sessionID = UUID().uuidString
+
     /// Newest three captions, oldest on the left, matching the three-bubble layout.
     private var bubbleCaptions: [LiveCaption] {
         captions.prefix(3).reversed().map { entry in
-            LiveCaption(id: entry.id, speakerName: entry.speakerName, text: entry.text)
+            LiveCaption(
+                id: entry.id,
+                speakerName: entry.speakerName,
+                text: entry.text,
+                spokenAt: entry.spokenAt
+            )
         }
     }
 
@@ -74,6 +81,9 @@ struct ContentView: View {
                     },
                     calibrationCount: calibrationCount,
                     isSettingUp: isPreparing,
+                    onWhatDidIMiss: { _ in
+                        try await summarizeMissedCaptions()
+                    },
                     canSpeak: !isCalibrating && !isPreparing && !isStarting,
                     onSpeak: { showSpeakSheet = true }
                 )
@@ -202,7 +212,8 @@ struct ContentView: View {
             captions.insert(CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
-                transcriptionSeconds: delivery.transcriptionSeconds
+                transcriptionSeconds: delivery.transcriptionSeconds,
+                spokenAt: Date()
             ), at: 0)
         }
     }
@@ -495,6 +506,25 @@ struct ContentView: View {
         status = error.localizedDescription
         print("Caption/capture error [\(captionID?.uuidString ?? "setup")]: \(error.localizedDescription)")
     }
+
+    /// Uses the full caption log, not the three on-screen bubbles. Does not touch the mic.
+    private func summarizeMissedCaptions() async throws -> String {
+        guard let configuration = ToneClientConfiguration.fromAppConfiguration(sessionID: Self.sessionID) else {
+            return "The summary server is not configured. Captions keep working offline."
+        }
+        let cutoff = Date().addingTimeInterval(-120)
+        let lines = captions.compactMap { entry -> MissedCaptionLine? in
+            guard entry.spokenAt >= cutoff else { return nil }
+            return MissedCaptionLine(
+                speaker: entry.speakerName,
+                text: entry.text,
+                tone: nil,
+                tEnd: entry.spokenAt.timeIntervalSince1970
+            )
+        }
+        let client = SummaryClient(summaryURL: summaryURL(from: configuration.serverURL))
+        return try await client.summarize(lines, token: configuration.token)
+    }
 }
 
 
@@ -545,21 +575,29 @@ private struct CaptionEntry: Identifiable {
     let text: String
     let speakerName: String
     let transcriptionSeconds: TimeInterval
+    var spokenAt: Date
 
-    init(result: TranscriptionResult, text: String, transcriptionSeconds: TimeInterval) {
+    init(
+        result: TranscriptionResult,
+        text: String,
+        transcriptionSeconds: TimeInterval,
+        spokenAt: Date = Date()
+    ) {
         self.id = result.captionID
         self.result = result
         self.text = text
         self.speakerName = "Someone"
         self.transcriptionSeconds = transcriptionSeconds
+        self.spokenAt = spokenAt
     }
 
-    init(id: UUID, text: String, speakerName: String) {
+    init(id: UUID, text: String, speakerName: String, spokenAt: Date = Date()) {
         self.id = id
         self.result = nil
         self.text = text
         self.speakerName = speakerName
         self.transcriptionSeconds = 0
+        self.spokenAt = spokenAt
     }
 }
 
