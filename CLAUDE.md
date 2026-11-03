@@ -7,7 +7,7 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
 
 ## Hard constraints
 - Captions, speaker highlighting, and sound alerts work **fully offline** on the iPhone.
-  Only tone tags may depend on a server.
+  Only tone tags and the optional last-two-minutes text summary may depend on a server.
 - **iOS only.** Minimal budget: everything must work without paid items (Apple dev account,
   OpenAI, cloud credits).
 - **Tone never blocks captions.** Captions render immediately; tone arrives later by `caption_id`.
@@ -15,8 +15,8 @@ doc, say so. Don't silently diverge. If a decision changes, update the doc in th
 - **No audio is ever stored** by the server (no disk, no logs). Only text, tags, probs, timings.
 - **No secrets, datasets, weights, or recordings in git.** Secrets in `.env` / `.xcconfig`
   (gitignored); data in the team's shared Drive; model artifacts in W&B.
-- **OpenAI is never called from the iOS app.** Only from `language/` benchmark scripts.
-- The only cloud piece is the optional tone server. Training runs locally on team Macs.
+- **OpenAI and xAI are never called from the iOS app.** The Grok summary benchmark lives in `language/`. The live summary is proxied by the server.
+- The only cloud piece is the optional server (tone tags, and an optional last-two-minutes caption summary). Training runs locally on team Macs.
 
 ## Conventions
 - **Interfaces first:** every model sits behind a protocol/class (`SpeakerScorer`, `ToneBackend`)
