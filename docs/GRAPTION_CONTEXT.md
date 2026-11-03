@@ -16,15 +16,15 @@ Example output:
 
 ### Hard constraints
 - **Minimal budget.** Requested: Apple Developer Program ($99), OpenAI API credits ($50), cloud credits ($100). Build everything so it works **without** them; they only unlock user testing and benchmarking.
-- **Dev-first.** The core is a local dev setup. The only cloud piece is an optional hosted tone server for remote user testing.
+- **Dev-first.** The core is a local dev setup. The only cloud piece is an optional hosted tone/STT server for remote user testing.
 - **iOS only.** No Android.
 - **Training compute:** the team's M-series Macs (PyTorch on `mps`). Training is never part of the live app.
-- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model only).
-- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network. Only tone tags may depend on a server (Mac or cloud).
+- **Live inference:** the iPhone, plus one M-series MacBook on the same Wi-Fi (tone model, and the optional STT proxy).
+- **Offline requirement:** captions, speaker highlighting, and sound alerts must work with no network via on-device WhisperKit. Tone tags and the optional online Grok caption boost may depend on a server (Mac or cloud). Online captions are off by default and require an explicit consent screen.
 - **User testing:** DHH testers use the app on their own phones at home via TestFlight. Their phones can't reach the dev Mac, which is why the tone server must also run in the cloud (or behind a tunnel).
 
 ### Non-goals (semester one)
-Android, public App Store release, user accounts, pose and hand landmarks, learned fusion, streaming partial captions (stretch goal), cloud hosting of anything other than the tone server.
+Android, public App Store release, user accounts, pose and hand landmarks, learned fusion, combining diarized speaker labels with face scores, cloud hosting of anything other than the tone/STT server. Streaming partial captions exist only in the optional online Grok STT mode.
 
 ---
 
@@ -34,9 +34,9 @@ The system lives in three places:
 
 | Zone | Role | Runs |
 |---|---|---|
-| **iPhone** (Swift app) | Everything live and per-frame; works offline | Capture, MediaPipe, speaker model, VAD, WhisperKit, SoundAnalysis, fusion, UI |
-| **MacBook** (M-series, same Wi-Fi) | Tone model while it's still being iterated on | FastAPI tone server, WavLM + tone head, SQLite logging |
-| **Cloud (optional)** | Same tone server, for remote/TestFlight testers | Docker container on GCP Cloud Run (or Mac + Cloudflare Tunnel as the $0 fallback) |
+| **iPhone** (Swift app) | Everything live and per-frame; works offline | Capture, MediaPipe, speaker model, VAD, WhisperKit, SoundAnalysis, fusion, UI; optional Grok STT client |
+| **MacBook** (M-series, same Wi-Fi) | Tone model while it's still being iterated on; optional STT proxy | FastAPI tone + STT server, WavLM + tone head, SQLite logging |
+| **Cloud (optional)** | Same tone/STT server, for remote/TestFlight testers | Docker container on GCP Cloud Run (or Mac + Cloudflare Tunnel as the $0 fallback) |
 | **Team Macs** (offline) | Training only | Data prep, training, evaluation, export |
 
 ```
@@ -46,30 +46,32 @@ iPHONE ────────────────────────�
  Mic ─┬→ Loudness ─────────────────────────────────→ SpeakerModel (Core ML GRU)
       │                                                     ↓ score per face
       │                                              ScoreBuffer (last 10s)
-      ├→ VAD → sentence segment ─┬→ WhisperKit → caption(text, t0, t1, id)
+      ├→ VAD → sentence segment ─┬→ WhisperKit → caption(text, t0, t1, id)  [default, always on]
       │                          │                          ↓
       │                          │                        Fusion ← ScoreBuffer
       │                          └→ ToneClient ──WS──┐       ↓
-      └→ SoundAnalysis → sound alerts ────────────── │ ──→ Caption UI
-                                                     │       ↑ tone tag (by caption id)
-MAC ─────────────────────────────────────────────────┼───────┘
+      ├→ [opt-in] GrokSTTClient ──WS /ws/stt ────────┤ ──→ Caption UI (partials only in this mode)
+      └→ SoundAnalysis → sound alerts ───────────────┘       ↑ tone tag (by caption id)
+MAC / CLOUD ─────────────────────────────────────────────────┘
  FastAPI /ws/session → WavLM(frozen) → layer-mix → mean-pool → ToneHead → TagMapper
-                     → Logger → SQLite
+ FastAPI /ws/stt (opt-in) → proxy PCM to xAI grok-voice-transcribe-2.0 (no audio stored)
+                     → Logger → SQLite (text/tags/timings only)
 ```
 
 ### One sentence through the system
 1. The camera sees 3 faces. MediaPipe outputs landmarks and blendshapes per face, and the tracker assigns stable IDs.
 2. Every frame, each face's last 15 frames of features plus mic loudness go into the speaker model, which outputs `p(speaking)`.
 3. VAD detects the end of a sentence and emits an audio segment with an ID and start and end times.
-4. WhisperKit transcribes the segment into a caption.
+4. WhisperKit transcribes the segment into a caption. This path stays running even when online captions are on, so fallback is immediate.
 5. Fusion picks the face with the highest average speaking score during that time window and attaches the caption to it.
 6. At the same time, the segment audio goes to the Mac. The tone model returns a tag for that caption ID, and the UI adds it.
 7. SoundAnalysis independently raises alerts such as "Doorbell."
+8. If the user has consented and turned on online captions, the phone also streams 16 kHz PCM to `/ws/stt`. The server proxies it to xAI `grok-voice-transcribe-2.0` (`XAI_API_KEY` is server-only; audio is not stored or logged). The UI shows streaming partials, prefixes a language code when the server detects one, and displays diarized speaker labels as Speaker N; combining them with face scores is later work.
 
-**Rule:** tone never blocks captions. Captions render immediately, and tone arrives later as an update.
+**Rule:** tone never blocks captions. Captions render immediately, and tone arrives later as an update. The optional online Grok boost never blocks or replaces WhisperKit as a fallback: if the STT socket errors or drops, on-device captions show again immediately.
 
-### Tone server deployment modes
-The same server code runs in three places. The app just points at a different URL.
+### Server deployment modes
+The same server code runs in three places. The app just points at a different URL. `/ws/session` is tone; `/ws/stt` is the optional Grok caption boost.
 
 | Mode | URL | When |
 |---|---|---|
@@ -77,7 +79,7 @@ The same server code runs in three places. The app just points at a different UR
 | `tunnel` | `wss://<name>.trycloudflare.com` | $0 remote testing while the Mac is on |
 | `cloud` | `wss://<service>.run.app` | Always-on remote/TestFlight testing (uses cloud credits) |
 
-Long-term, the tone model moves on-device (Core ML), which removes the server entirely.
+Long-term, the tone model moves on-device (Core ML). The STT proxy remains optional and off unless the user consents.
 
 ---
 
@@ -87,7 +89,7 @@ Long-term, the tone model moves on-device (Core ML), which removes the server en
 |---|---|
 | iOS app | Swift, SwiftUI, AVFoundation (capture), Core ML, URLSessionWebSocketTask |
 | Face features | MediaPipe Face Landmarker (iOS SDK in the app, `mediapipe` Python on PACE), installed from the Google MediaPipe Swift package, **same `.task` model file in both** |
-| Transcription | WhisperKit (on-device Whisper). Start with `base.en`, benchmark `small.en` |
+| Transcription | WhisperKit (on-device Whisper, default). Optional online boost: xAI `grok-voice-transcribe-2.0` via our `/ws/stt` proxy. Start with `base.en`, benchmark `small.en` |
 | VAD | Energy-based first; upgrade to Silero VAD |
 | Sound events | Apple SoundAnalysis built-in classifier (`SNClassifySoundRequest`, `.version1`) |
 | Speaker model | PyTorch GRU, exported with `coremltools` to `.mlpackage` |
@@ -118,7 +120,7 @@ graption/
 │       ├── GraptionVision/   # camera capture, MediaPipe wrapper, FaceTracker, FeatureBuilder, SpeakerModel
 │       ├── GraptionAudio/    # mic capture, Loudness, VAD, WhisperKit wrapper, SoundAnalysis
 │       ├── GraptionFusion/   # ScoreBuffer, Fusion
-│       ├── GraptionNetwork/  # ToneClient
+│       ├── GraptionNetwork/  # ToneClient, GrokSTTClient
 │       └── GraptionUI/       # caption views, alerts, past-meetings dashboard, debug recorder UI
 ├── server/                   # tone server (FastAPI): Mac, tunnel, or cloud
 │   ├── app/{main.py, ws.py, tone.py, tags.py, db.py, config.py, auth.py}
@@ -280,10 +282,17 @@ Must match `ml/common/features.py` exactly: same order, same normalization. It p
   speech from noise.
 
 **WhisperKit**
-- First launch with no local model shows a blank Install base.en page that says Wi-Fi is needed. Later launches load the local copy and caption offline.
+- First launch with no local model shows a blank Install base.en page that says Wi-Fi is needed. Later launches load the local copy and caption offline. Offline setup is still required because WhisperKit is the fallback when online captions are off or the socket fails.
 - Transcribes each segment with word timestamps enabled.
 - Emits a `caption` with `speaker_id` pending.
-- Stretch goal: streaming partial captions.
+- Streaming partial captions exist only in the optional online Grok STT mode. WhisperKit remains segment-based. Language is auto-detected in online mode; the UI prefixes the language code (for example `[hi] text`).
+
+**GrokSTTClient** (optional online caption boost)
+- Off unless the user accepts the consent screen and turns on **Online captions** in Settings. Default off.
+- Connects to `ws(s)://<host>/ws/stt?session_id=` with the same bearer token as tone when a token exists.
+- After `stt.ready`, streams PCM16 LE mono 16 kHz, then `audio.done` on stop.
+- Incoming `stt.partial` / `stt.done` replace WhisperKit in the visible list while the boost is healthy. `stt.error`, disconnect, or a failed connect clears the mic tap and WhisperKit captions show again. The pipeline itself is never stopped.
+- Diarized speaker labels are shown as Speaker N; combining them with face scores is later work.
 
 **Fusion** (plain code, no ML)
 ```
@@ -311,7 +320,8 @@ for caption [t0, t1]:
 - If disconnected, drop tone silently and retry the connection every 5s. This must never affect captions.
 
 **UI**
-- Live caption list, with the speaker name/color matching a highlight box drawn on that face.
+- Live caption list, with the speaker name/color matching a highlight box drawn on that face. Online Grok captions use `Speaker N` when diarization is present, otherwise `Someone`.
+- Settings includes an **Online captions** toggle (default off). Turning it on without prior consent presents `OnlineCaptionConsentView`. Once accepted, the toggle can go on and off without re-prompting. Preferences stay on the phone; microphone audio is sent only while the toggle is on.
 - Combined A2/A3 demo places matching large Start/Stop listening and calibration
   controls above the caption feed, with sound banners, haptics, and accessibility
   announcements. Stop clears the current banner while pending captions finish.
@@ -362,7 +372,7 @@ for caption [t0, t1]:
 | Tone server | Settings screen: pick `local`, `tunnel`, or `cloud`, or enter a URL | Fixed to `cloud` (or `tunnel`); URL and token set at build time via `.xcconfig`, never committed |
 | Models | Bundled default; runtime override via `MLModel.compileModel(at:)` | Bundled only (testers can't sideload models) |
 | Debug recorder | Available | **Disabled**. External testers' audio and video are never stored |
-| Consent | n/a | First-launch screen explaining that sentence audio is sent to our server for tone detection and not stored. Tone can be turned off |
+| Consent | Settings: **Online captions** is off until the user accepts a screen that explains continuous mic audio is forwarded to xAI and not stored. After accept, the toggle can go on/off without re-prompting. Tone: sentence audio for tags can be turned off separately. | Same online-caption consent, plus the tone-detection consent that sentence audio is sent to our server and not stored. Both default to staying off unless accepted. |
 
 **TestFlight notes**
 - The external-tester build needs Beta App Review and privacy details in App Store Connect. Allow a few days.
@@ -393,6 +403,7 @@ for caption [t0, t1]:
   - Allow a WebSocket request timeout of at least 60 min.
   - Bake the WavLM and head weights into the image so cold starts don't download them.
 - **Endpoint:** `/ws/session`. One connection per app session, handling `tone_request` and `caption_log`.
+- **Optional STT endpoint:** `/ws/stt?session_id=`. Same bearer token as tone when a token exists. After connect the server sends `stt.ready`, then accepts optional `stt.start` (`sample_rate` 16000, `keyterms`) and binary PCM16 little-endian mono 16 kHz frames, then `audio.done`. It proxies that audio to `wss://api.x.ai/v1/stt` model `grok-voice-transcribe-2.0` with interim results and diarization. Replies are `stt.partial`, `stt.done`, and `stt.error`. `XAI_API_KEY` is server-only and never shipped in the app. Audio is not stored or logged.
 - **Auth:** if `TONE_TOKEN` is set, require a matching bearer token. Always set it outside `local` mode.
 - **Pipeline** (device auto-select: `cuda` → `mps` → `cpu`; the code must run correctly on all three):
   1. Decode PCM16 and resample to 16 kHz if needed.
@@ -407,11 +418,11 @@ for caption [t0, t1]:
   - otherwise `null`; segments under 0.5 s are always `null`
   - `probs` are all zero in this mode: the schema's 6 emotions don't apply to arousal/valence.
   - Weights load from the local Hugging Face cache (`uv run hf download audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim`); torch, transformers, and scipy come from the uv workspace (`graption-ml`), not `graption-server`'s own dependencies.
-- **Config (env vars):** `TONE_BACKEND` (`mock` default | `audeering` | `custom` later), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
+- **Config (env vars):** `TONE_BACKEND` (`mock` default | `audeering` | `custom` later), `TONE_HEAD_PATH`, `TAG_THRESHOLD`, `TONE_TOKEN`, `XAI_API_KEY` (server-only, for `/ws/stt`; never shipped in the app), `DEPLOY_MODE` (`local` | `tunnel` | `cloud`), `LOG_EXPORT_BUCKET` (cloud only), `TONE_LOG_DIR` (default repo-root `logs/`).
 - **CPU performance:** the audEERING baseline is the large wav2vec2 variant (~165M params) and may be slow on CPU. Benchmark per-sentence latency on Cloud Run before user testing. If it's over ~1s, use the custom WavLM-base head in cloud mode.
 - **SQLite tables:** `sessions`, `captions` (from `caption_log`), `tone_results` (probs, model_version, latency).
   - Cloud Run disks are ephemeral, so in cloud mode, export the SQLite file to `LOG_EXPORT_BUCKET` at session end.
-- **Privacy:** never write request audio to disk or logs in any mode. Only text, tags, probabilities, and timings are stored.
+- **Privacy:** never write request audio (tone segments or STT PCM) to disk or logs in any mode. Only text, tags, probabilities, and timings are stored.
 - **Logging:** application logs go to the console and a fresh gitignored repo-root
   `logs/server-<UTC-timestamp>-<unique-id>.jsonl` on each server start; the startup log prints
   the file path. Each run rotates at 5 MiB with three backups; previous runs are preserved. Startup/shutdown and warnings/errors are always logged.
@@ -539,7 +550,7 @@ If the device is overloaded, degrade in this order:
 - **Every event and log** carries model versions.
 - **Every training run** goes to W&B, with the config committed alongside it.
 - **Branching:** PRs to `main`, and CI must pass. Add `CODEOWNERS` per team folder once reviews are enforced.
-- **Secrets** (`TONE_TOKEN`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo.
+- **Secrets** (`TONE_TOKEN`, `XAI_API_KEY`, OpenAI key, cloud credentials) live in `.env` or `.xcconfig` files that are gitignored, never in code or the repo. `XAI_API_KEY` is server-only.
 - **Cost control:** Cloud Run scales to zero. Set a billing budget alert at 50% and 90% of the credits. OpenAI keys get a hard monthly spend limit.
 - **Licenses:** the audEERING model and MSP-Podcast are non-commercial. That's fine for this academic MVP, but flag it before any commercial use.
 
@@ -585,7 +596,7 @@ If the device is overloaded, degrade in this order:
 ## 16. Decision log (why things are the way they are)
 
 - **Phone does all per-frame work; nothing streams video.** Latency, offline use, and privacy. Landmarks are tiny.
-- **WhisperKit on-device:** captions work offline, and we don't modify Whisper, so there's no iteration cost.
+- **WhisperKit on-device:** captions, speaker highlighting, and sound alerts work fully offline, and we don't modify Whisper, so there's no iteration cost. Online Grok STT is an opt-in boost, never the only path.
 - **Fusion on the phone:** speaker scores never leave the device, highlights are instant, and the server stays simple.
 - **Speaker model on the phone from the start:** it's tiny and converts to Core ML trivially. Iteration happens offline on recorded replays, not live.
 - **Tone model on the Mac for now:** WavLM → Core ML conversion is finicky, and Python iteration is fast. It moves on-device at end of semester.

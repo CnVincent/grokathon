@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "GraptionNetwork",
-    platforms: [.iOS(.v17)],
+    platforms: [.iOS(.v17), .macOS(.v13)],
     products: [.library(name: "GraptionNetwork", targets: ["GraptionNetwork"])],
     dependencies: [.package(path: "../GraptionCore")],
     targets: [
