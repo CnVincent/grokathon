@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var capture: MicrophoneCapture?
     @StateObject private var toneMonitor = ToneConnectionMonitor(
         configuration: ToneClientConfiguration.fromAppConfiguration(
-            sessionID: UUID().uuidString
+            sessionID: ContentView.sessionID
         )
     )
     @State private var soundAlertModel = SoundAlertModel()
@@ -32,10 +32,12 @@ struct ContentView: View {
         capture != nil && isReady && !isPreparing && !isCalibrating && !isStarting
     }
 
+    private static let sessionID = UUID().uuidString
+
     /// Newest three captions, oldest on the left, matching the three-bubble layout.
     private var bubbleCaptions: [LiveCaption] {
         captions.prefix(3).reversed().map { entry in
-            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text)
+            LiveCaption(id: entry.id, speakerName: "Someone", text: entry.text, spokenAt: entry.spokenAt)
         }
     }
 
@@ -62,7 +64,10 @@ struct ContentView: View {
                         }
                     },
                     calibrationCount: calibrationCount,
-                    isSettingUp: isPreparing
+                    isSettingUp: isPreparing,
+                    onWhatDidIMiss: { _ in
+                        try await summarizeMissedCaptions()
+                    }
                 )
             } else {
                 InstallBaseEnPage(isInstalling: isPreparing, detail: setupFailed ? status : nil) {
@@ -167,7 +172,8 @@ struct ContentView: View {
             captions.insert(CaptionEntry(
                 result: caption,
                 text: displayText.isEmpty ? "[No speech recognized]" : displayText,
-                transcriptionSeconds: delivery.transcriptionSeconds
+                transcriptionSeconds: delivery.transcriptionSeconds,
+                spokenAt: Date()
             ), at: 0)
         }
     }
@@ -270,6 +276,25 @@ struct ContentView: View {
         status = error.localizedDescription
         print("Caption/capture error [\(captionID?.uuidString ?? "setup")]: \(error.localizedDescription)")
     }
+
+    /// Uses the full caption log, not the three on-screen bubbles. Does not touch the mic.
+    private func summarizeMissedCaptions() async throws -> String {
+        guard let configuration = ToneClientConfiguration.fromAppConfiguration(sessionID: Self.sessionID) else {
+            return "The summary server is not configured. Captions keep working offline."
+        }
+        let cutoff = Date().addingTimeInterval(-120)
+        let lines = captions.compactMap { entry -> MissedCaptionLine? in
+            guard entry.spokenAt >= cutoff else { return nil }
+            return MissedCaptionLine(
+                speaker: "Someone",
+                text: entry.text,
+                tone: nil,
+                tEnd: entry.spokenAt.timeIntervalSince1970
+            )
+        }
+        let client = SummaryClient(summaryURL: summaryURL(from: configuration.serverURL))
+        return try await client.summarize(lines, token: configuration.token)
+    }
 }
 
 
@@ -312,5 +337,6 @@ private struct CaptionEntry: Identifiable {
     let result: TranscriptionResult
     let text: String
     let transcriptionSeconds: TimeInterval
+    var spokenAt: Date = Date()
     var id: UUID { result.captionID }
 }
