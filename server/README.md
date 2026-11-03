@@ -102,6 +102,25 @@ Export `DEPLOY_MODE=tunnel` or `cloud` to require a configured token as well.
 These environment variables are read from the process; to load a local `.env` file,
 pass uvicorn's `--env-file <path>` option. Hosting and real inference are later work.
 
+## Online captions (optional)
+
+Optional Grok streaming speech-to-text proxy. WhisperKit on the phone stays the offline
+fallback; this endpoint is not required for captions.
+
+The phone connects to `GET /ws/stt?session_id=<session-id>` (WebSocket) on the same
+server. Handshake auth matches `/ws/session` (`TONE_TOKEN` / `DEPLOY_MODE`). The phone
+never sees the xAI key.
+
+- `STT_BACKEND` — `mock` (default, no network) or `xai`. Read per connection.
+- `XAI_API_KEY` — required for `xai`. The server adds `Authorization` only on the
+  upstream `wss://api.x.ai/v1/stt` socket.
+
+PCM stays in memory and is forwarded as binary frames. Audio, transcripts, and the API
+key are never written to disk or logs. If `STT_BACKEND=xai` and the key is missing, or
+the backend name is unknown, the server replies `stt_unavailable` and on-device
+captions still work. The first `stt.start` keyterms are copied onto the xAI URL
+(`keyterm` repeated). Language is left unset so xAI can auto-detect and code-switch.
+
 ## Verbose logs and metrics
 
 Enable application diagnostics from the repo root:
